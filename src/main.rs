@@ -3,7 +3,6 @@ mod analyzer;
 // mod http_api;
 
 use acpi_api::ICAPWorker;
-
 use std::{env, error::Error, net::SocketAddr};
 
 #[tokio::main]

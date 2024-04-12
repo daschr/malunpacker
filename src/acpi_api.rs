@@ -13,19 +13,19 @@ use tokio::{
     net,
 };
 
-trait AsString {
-    fn as_string(&self) -> String;
+trait AsStr {
+    fn as_str(&self) -> &'static str;
 }
 
-impl AsString for SectionType {
-    fn as_string(&self) -> String {
+impl AsStr for SectionType {
+    fn as_str(&self) -> &'static str {
         match self {
-            SectionType::NullBody => str!("NullBody"),
-            SectionType::RequestHeader => str!("RequestHeader"),
-            Self::RequestBody => str!("RequestBody"),
-            Self::ResponseHeader => str!("ResponseHeader"),
-            Self::ResponseBody => str!("ResponseBody"),
-            Self::OptionsBody => str!("OptionsBody"),
+            SectionType::NullBody => "NullBody",
+            SectionType::RequestHeader => "RequestHeader",
+            Self::RequestBody => "RequestBody",
+            Self::ResponseHeader => "ResponseHeader",
+            Self::ResponseBody => "ResponseBody",
+            Self::OptionsBody => "OptionsBody",
         }
     }
 }
@@ -201,7 +201,7 @@ impl ICAPWorker {
         // println!("\nsections: {:?}", req.encapsulated_sections);
         if let Some(sections) = req.encapsulated_sections.as_ref() {
             for (sec, sectval) in sections.iter() {
-                println!("sec: {}", sec.as_string());
+                println!("sec: {}", sec.as_str());
                 match from_utf8(&sectval) {
                     Ok(b) => println!("{}", b),
                     Err(e) => println!("Error dec: {:?}\n{:?}", e, sectval),
