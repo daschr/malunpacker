@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 icaparse = "0.2.0"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "rt-multi-thread", "macros", "time", "sync", "net"] }
+yara = "0.26.0"

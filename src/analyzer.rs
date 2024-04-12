@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub enum Sample {
     Mail(Vec<u8>),
     Raw(Vec<u8>),
@@ -12,7 +14,7 @@ pub struct AnalysisResult {}
 pub struct Analyzer {}
 
 impl Analyzer {
-    pub fn new() -> Self {
+    pub fn new(yara_rules: &PathBuf) -> Self {
         Analyzer {}
     }
 
