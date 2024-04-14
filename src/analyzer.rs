@@ -83,17 +83,11 @@ impl Analyzer {
         })
     }
 
-    pub fn analyze_raw(
-        &self,
-        raw_sample: Location,
-        yara_scanner: &Scanner,
-    ) -> Result<(), AnalyzerError> {
+    pub fn analyze_raw(&self, raw_sample: Location) -> Result<Vec<AnalysisResult>, AnalyzerError> {
         let rules_lock = self.yara_ruleset.get_current_rules();
-        let mut scanner = rules_lock.as_ref().unwrap().scanner()?;
 
         let mut scan_results: Vec<AnalysisResult> = Vec::new();
 
-        let temp_dir = tempfile::tempdir().expect("Could not create a temporary directory");
         let mut tempdir_stack: Vec<TempDir> = Vec::new();
         let mut scan_stack: Vec<Location> = Vec::new();
         scan_stack.push(raw_sample);
@@ -116,8 +110,12 @@ impl Analyzer {
 
             if let Some(analyzer) = self.sample_analyzers.get(&sample_type_str) {
                 match analyzer(&sample, &context) {
-                    Ok(r) => {
+                    Ok((r, dropped_samples)) => {
                         println!("{:?}-analyzer returned: {:?}", sample_type_str, r);
+                        if let Some(dropped_samples) = dropped_samples {
+                            scan_stack.extend(dropped_samples);
+                        }
+                        scan_results.push(r);
                     }
                     Err(e) => {
                         eprintln!(
@@ -127,12 +125,13 @@ impl Analyzer {
                     }
                 }
             } else {
+                eprintln!("No analyzer for \"{:?}\" found!", sample_type_str);
             }
 
             tempdir_stack.push(unpacking_loc);
         }
 
-        Ok(())
+        Ok(scan_results)
     }
 }
 

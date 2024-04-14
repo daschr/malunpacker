@@ -1,8 +1,7 @@
-use infer::archive;
-use sevenz_rust::Archive;
-
-use crate::analyzer::{AnalysisResult, Analyze, AnalyzeFn, AnalyzerError, Location, SampleContext};
+use crate::analyzer::{AnalysisResult, Analyze, AnalyzerError, Location, SampleContext};
+use crate::filelister;
 use crate::inmem_file::InMemFile;
+use sevenz_rust::{decompress_with_password, Password};
 use std::fs::File;
 use std::io::{Read, Seek};
 
@@ -17,25 +16,45 @@ impl Analyze for ZipAnalyzer {
         sample: &Location,
         context: &SampleContext,
     ) -> Result<(AnalysisResult, Option<Vec<Location>>), AnalyzerError> {
-        let len = match &sample {
-            Location::InMem(m) => m.len(),
-            Location::File(path) => {
-                let fd = File::open(path)?;
-
-                fd.metadata()?.len() as usize
-            }
-        };
-
         let mut sample_source: Box<dyn ReadAndSeek> = match &sample {
             Location::InMem(mem) => Box::new(InMemFile::new(mem)),
             Location::File(path) => Box::new(File::open(path)?),
         };
 
-        let mut dropped_samples = Vec::new();
+        let mut dropped_samples: Option<Vec<Location>> = None;
 
-        match Archive::read(&mut sample_source, len as u64, &[]) {
-            Ok(archive) => archive.files,
-            Err(sevenz_rust::Error::PasswordRequired) => {}
+        match decompress_with_password(
+            &mut sample_source,
+            context.unpacking_location,
+            Password::empty(),
+        ) {
+            Ok(_) => {
+                let sample_list =
+                    filelister::list_files(context.unpacking_location, |p| Location::File(p))?;
+
+                if sample_list.is_empty() {
+                    dropped_samples = Some(sample_list);
+                }
+            }
+            Err(sevenz_rust::Error::PasswordRequired) => {
+                for pw in context.archive_passwords {
+                    if let Ok(()) = decompress_with_password(
+                        &mut sample_source,
+                        context.unpacking_location,
+                        Password::from(pw.as_str()),
+                    ) {
+                        let sample_list =
+                            filelister::list_files(context.unpacking_location, |p| {
+                                Location::File(p)
+                            })?;
+
+                        if sample_list.is_empty() {
+                            dropped_samples = Some(sample_list);
+                        }
+                        break;
+                    }
+                }
+            }
             Err(e) => {
                 eprintln!("Could not unpack sample: {:?}", e);
             }
@@ -58,7 +77,7 @@ impl Analyze for ZipAnalyzer {
                     Some(found_rules)
                 },
             },
-            None,
+            dropped_samples,
         ))
     }
 

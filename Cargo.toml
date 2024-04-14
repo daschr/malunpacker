@@ -10,6 +10,6 @@ icaparse = "0.2.0"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "rt-multi-thread", "macros", "time", "sync", "net"] }
 yara = "0.26.0"
 infer = "0.15.0"
-sevenz-rust = "0.6.0"
+sevenz-rust = { version = "0.6.0", features = ["aes256"]}
 tempfile = "3.10.1"
 # magic = "0.16.2"

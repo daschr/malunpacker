@@ -1,8 +1,8 @@
 mod acpi_api;
 mod analyzer;
 mod analyzers;
+mod filelister;
 mod inmem_file;
-mod sevenz_rust_brute;
 mod yara_rulset;
 // mod http_api;
 
