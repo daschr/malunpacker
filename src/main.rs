@@ -1,5 +1,6 @@
 mod acpi_api;
 mod analyzer;
+mod sevenz_rust_brute;
 // mod http_api;
 
 use acpi_api::ICAPWorker;
