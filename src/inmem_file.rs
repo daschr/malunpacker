@@ -1,5 +1,9 @@
 use std::io::{Read, Seek, SeekFrom};
 
+pub trait ReadAndSeek: Read + Seek {}
+
+impl<RS: Read + Seek> ReadAndSeek for RS {}
+
 pub struct InMemFile<'a> {
     pos: u64,
     buf: &'a [u8],

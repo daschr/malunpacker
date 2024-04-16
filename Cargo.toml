@@ -10,6 +10,12 @@ icaparse = "0.2.0"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "rt-multi-thread", "macros", "time", "sync", "net"] }
 yara = "0.26.0"
 infer = "0.15.0"
-sevenz-rust = { version = "0.6.0", features = ["aes256"]}
+sevenz-rust = { version = "0.6.0", features = ["aes256", "zstd", "bzip2"]}
 tempfile = "3.10.1"
+simple_logger = "4.3.3"
+log = "0.4.21"
+tracing = "0.1.40"
+thiserror = "1.0.58"
+tracing-subscriber = "0.3.18"
+zip = "0.6.6"
 # magic = "0.16.2"

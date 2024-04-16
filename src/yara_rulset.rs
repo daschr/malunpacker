@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::Path,
     sync::{atomic::AtomicUsize, RwLock},
 };
 
@@ -20,7 +20,7 @@ impl YaraRuleset {
         }
     }
 
-    pub fn update_yara_rules(&self, yara_rules_loc: &PathBuf) -> Result<(), AnalyzerError> {
+    pub fn update_yara_rules(&self, yara_rules_loc: &Path) -> Result<(), AnalyzerError> {
         let compiler: Compiler = Compiler::new()?;
         let compiler = compiler.add_rules_file(yara_rules_loc)?;
 

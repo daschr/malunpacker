@@ -1,19 +1,18 @@
 use infer;
 use std::collections::HashMap;
 
+use std::fs::File;
 use std::io::Error as IoError;
 
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use yara::{Rules as YaraRules, Scanner, YaraError};
+use yara::{Rules as YaraRules, YaraError};
 
 use crate::analyzers::*;
+use crate::inmem_file::{InMemFile, ReadAndSeek};
 use crate::yara_rulset::YaraRuleset;
 
-pub enum Sample {
-    Mail(Vec<u8>),
-    Raw(Vec<u8>),
-}
+use tracing::{debug, error, info, span, Level};
 
 macro_rules! wrap_err {
     ($err:ident, $enum:ident) => {
@@ -35,11 +34,15 @@ macro_rules! wrap_err_to_val {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AnalyzerError {
+    #[error("Other error")]
     Other(Box<dyn std::error::Error>),
+    #[error("IoError")]
     IoError(IoError),
+    #[error("YaraError")]
     YaraError(YaraError),
+    #[error("YaraError2")]
     YaraCrateError(yara::Error),
 }
 
@@ -53,13 +56,64 @@ pub enum Location {
     File(PathBuf),
 }
 
+#[derive(Debug)]
+pub enum Sample {
+    Mail(Vec<u8>),
+    Raw(Vec<u8>),
+    File {
+        name: Option<String>,
+        data: Location,
+    },
+}
+
+impl Sample {
+    pub fn get_fd<'a>(&'a self) -> Result<Box<dyn ReadAndSeek + 'a>, IoError> {
+        Ok(match self {
+            Sample::Mail(mem) => Box::new(InMemFile::new(mem)),
+            Sample::Raw(mem) => Box::new(InMemFile::new(mem)),
+            Sample::File {
+                data: Location::InMem(mem),
+                ..
+            } => Box::new(InMemFile::new(mem)),
+            Sample::File {
+                data: Location::File(path),
+                ..
+            } => Box::new(File::open(path)?),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct AnalysisResult {
+    pub matched_yara_rules: Option<Vec<String>>,
+}
+
+pub struct SampleContext<'a> {
+    pub yara_rules: &'a YaraRules,
+    pub archive_passwords: &'a [String],
+    pub unpacking_location: &'a Path,
+}
+
+pub type AnalyzeFn = fn(
+    sample: &Sample,
+    context: &SampleContext,
+) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError>;
+
+pub trait Analyze {
+    fn analyze(
+        sample: &Sample,
+        context: &SampleContext,
+    ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError>;
+    fn mime_types() -> &'static [&'static str];
+}
+
 pub struct Analyzer {
     yara_ruleset: YaraRuleset,
     sample_analyzers: HashMap<Option<String>, AnalyzeFn>,
 }
 
 impl Analyzer {
-    pub fn new(yara_rules_loc: &PathBuf) -> Result<Self, AnalyzerError> {
+    pub fn new(yara_rules_loc: &Path) -> Result<Self, AnalyzerError> {
         let yara_ruleset = YaraRuleset::new();
         yara_ruleset.update_yara_rules(yara_rules_loc)?;
 
@@ -77,55 +131,71 @@ impl Analyzer {
         })
     }
 
-    pub fn analyze(&self, sample: Sample) -> Result<AnalysisResult, AnalyzerError> {
-        Ok(AnalysisResult {
-            matched_yara_rules: None,
-        })
-    }
+    pub fn analyze(&self, sample: Sample) -> Result<Vec<AnalysisResult>, AnalyzerError> {
+        let c_span = span!(Level::DEBUG, "analyze_raw");
+        let _guard = c_span.entered();
 
-    pub fn analyze_raw(&self, raw_sample: Location) -> Result<Vec<AnalysisResult>, AnalyzerError> {
         let rules_lock = self.yara_ruleset.get_current_rules();
 
         let mut scan_results: Vec<AnalysisResult> = Vec::new();
 
         let mut tempdir_stack: Vec<TempDir> = Vec::new();
-        let mut scan_stack: Vec<Location> = Vec::new();
-        scan_stack.push(raw_sample);
+        let mut scan_stack: Vec<Sample> = Vec::new();
+        scan_stack.push(sample);
 
         while !scan_stack.is_empty() {
             let sample = scan_stack.pop().unwrap();
+            match &sample {
+                Sample::Mail(mem) | Sample::Raw(mem) => {
+                    info!("Popped sample: {:?}", &mem[0..mem.len().min(16)]);
+                }
+                Sample::File { name, .. } => {
+                    info!("Popped Sample::File{{name: \"{:?}\", ..}}", name);
+                }
+            }
+
             let sample_type = match &sample {
-                Location::InMem(mem) => infer::get(&mem),
-                Location::File(path) => infer::get_from_path(path)?,
+                Sample::Mail(mem) => infer::get(&mem),
+                Sample::Raw(mem) => infer::get(&mem),
+                Sample::File {
+                    data: Location::InMem(mem),
+                    ..
+                } => infer::get(&mem),
+                Sample::File {
+                    data: Location::File(path),
+                    ..
+                } => infer::get_from_path(path)?,
             };
             let sample_type_str = sample_type.map(|s| s.mime_type().to_string());
 
-            let unpacking_loc = TempDir::new()?;
+            info!("sample type: {:?}", sample_type_str);
 
+            let unpacking_loc = TempDir::new()?;
+            debug!("Created new unpacking location: {:?}", unpacking_loc.path());
             let context = SampleContext {
                 yara_rules: rules_lock.as_ref().unwrap(),
-                archive_passwords: &[String::new()],
+                archive_passwords: &[],
                 unpacking_location: unpacking_loc.path(),
             };
 
             if let Some(analyzer) = self.sample_analyzers.get(&sample_type_str) {
                 match analyzer(&sample, &context) {
                     Ok((r, dropped_samples)) => {
-                        println!("{:?}-analyzer returned: {:?}", sample_type_str, r);
+                        debug!("{:?}-analyzer returned: {:?}", sample_type_str, r);
                         if let Some(dropped_samples) = dropped_samples {
                             scan_stack.extend(dropped_samples);
                         }
                         scan_results.push(r);
                     }
                     Err(e) => {
-                        eprintln!(
+                        error!(
                             "{:?}-analyzer failed to analyze {:?}: {:?}",
                             sample_type_str, sample, e
                         );
                     }
                 }
             } else {
-                eprintln!("No analyzer for \"{:?}\" found!", sample_type_str);
+                error!("No analyzer for \"{:?}\" found!", sample_type_str);
             }
 
             tempdir_stack.push(unpacking_loc);
@@ -133,28 +203,4 @@ impl Analyzer {
 
         Ok(scan_results)
     }
-}
-
-#[derive(Debug)]
-pub struct AnalysisResult {
-    pub matched_yara_rules: Option<Vec<String>>,
-}
-
-pub struct SampleContext<'a> {
-    pub yara_rules: &'a YaraRules,
-    pub archive_passwords: &'a [String],
-    pub unpacking_location: &'a Path,
-}
-
-pub type AnalyzeFn = fn(
-    sample: &Location,
-    context: &SampleContext,
-) -> Result<(AnalysisResult, Option<Vec<Location>>), AnalyzerError>;
-
-pub trait Analyze {
-    fn analyze(
-        sample: &Location,
-        context: &SampleContext,
-    ) -> Result<(AnalysisResult, Option<Vec<Location>>), AnalyzerError>;
-    fn mime_types() -> &'static [&'static str];
 }
