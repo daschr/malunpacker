@@ -1,4 +1,3 @@
-use infer;
 use std::collections::HashMap;
 
 use std::fs::File;
@@ -11,7 +10,8 @@ use yara::{Rules as YaraRules, YaraError};
 use crate::analyzers::*;
 use crate::inmem_file::{InMemFile, ReadAndSeek};
 use crate::yara_rulset::YaraRuleset;
-
+use magic::cookie::{DatabasePaths, Load};
+use magic::Cookie as MagicCookie;
 use tracing::{debug, error, info, span, Level};
 
 macro_rules! wrap_err {
@@ -44,11 +44,26 @@ pub enum AnalyzerError {
     YaraError(YaraError),
     #[error("YaraError2")]
     YaraCrateError(yara::Error),
+    #[error("InvalidSample")]
+    InvalidSample,
 }
 
 wrap_err!(IoError, AnalyzerError);
 wrap_err!(YaraError, AnalyzerError);
 wrap_err_to_val!(yara::Error, YaraCrateError, AnalyzerError);
+wrap_err_to_val!(Box<dyn std::error::Error>, Other, AnalyzerError);
+
+impl From<magic::cookie::OpenError> for AnalyzerError {
+    fn from(value: magic::cookie::OpenError) -> Self {
+        AnalyzerError::Other(Box::new(value))
+    }
+}
+
+impl From<magic::cookie::Error> for AnalyzerError {
+    fn from(value: magic::cookie::Error) -> Self {
+        AnalyzerError::Other(Box::new(value))
+    }
+}
 
 #[derive(Debug)]
 pub enum Location {
@@ -57,34 +72,23 @@ pub enum Location {
 }
 
 #[derive(Debug)]
-pub enum Sample {
-    Mail(Vec<u8>),
-    Raw(Vec<u8>),
-    File {
-        name: Option<String>,
-        data: Location,
-    },
+pub struct Sample {
+    pub name: Option<String>,
+    pub data: Location,
 }
 
 impl Sample {
     pub fn get_fd<'a>(&'a self) -> Result<Box<dyn ReadAndSeek + 'a>, IoError> {
-        Ok(match self {
-            Sample::Mail(mem) => Box::new(InMemFile::new(mem)),
-            Sample::Raw(mem) => Box::new(InMemFile::new(mem)),
-            Sample::File {
-                data: Location::InMem(mem),
-                ..
-            } => Box::new(InMemFile::new(mem)),
-            Sample::File {
-                data: Location::File(path),
-                ..
-            } => Box::new(File::open(path)?),
+        Ok(match &self.data {
+            Location::InMem(mem) => Box::new(InMemFile::new(mem.as_slice())),
+            Location::File(path) => Box::new(File::open(path)?),
         })
     }
 }
 
 #[derive(Debug)]
 pub struct AnalysisResult {
+    pub sample_id: Option<String>,
     pub matched_yara_rules: Option<Vec<String>>,
 }
 
@@ -109,6 +113,7 @@ pub trait Analyze {
 
 pub struct Analyzer {
     yara_ruleset: YaraRuleset,
+    magic_cookie: MagicCookie<Load>,
     sample_analyzers: HashMap<Option<String>, AnalyzeFn>,
 }
 
@@ -119,14 +124,31 @@ impl Analyzer {
 
         let mut sample_analyzers: HashMap<Option<String>, AnalyzeFn> = HashMap::new();
 
+        SevenZAnalyzer::mime_types().iter().for_each(|m| {
+            sample_analyzers.insert(Some((*m).to_string()), SevenZAnalyzer::analyze);
+        });
+
         ZipAnalyzer::mime_types().iter().for_each(|m| {
             sample_analyzers.insert(Some((*m).to_string()), ZipAnalyzer::analyze);
         });
 
+        MailAnalyzer::mime_types().iter().for_each(|m| {
+            sample_analyzers.insert(Some((*m).to_string()), MailAnalyzer::analyze);
+        });
+
+        Iso9660Analyzer::mime_types().iter().for_each(|m| {
+            sample_analyzers.insert(Some((*m).to_string()), Iso9660Analyzer::analyze);
+        });
+
         sample_analyzers.insert(None, RawAnalyzer::analyze);
+
+        let cookie = MagicCookie::open(magic::cookie::Flags::MIME_TYPE)?;
+        let db_paths: DatabasePaths = Default::default();
+        let cookie = cookie.load(&db_paths).expect("Could not load database");
 
         Ok(Analyzer {
             yara_ruleset,
+            magic_cookie: cookie,
             sample_analyzers,
         })
     }
@@ -145,28 +167,28 @@ impl Analyzer {
 
         while !scan_stack.is_empty() {
             let sample = scan_stack.pop().unwrap();
-            match &sample {
-                Sample::Mail(mem) | Sample::Raw(mem) => {
-                    info!("Popped sample: {:?}", &mem[0..mem.len().min(16)]);
+
+            match &sample.data {
+                Location::InMem(mem) => {
+                    info!(
+                        "Popped sample Sample {{ name: {:?}, data: {:?} }}",
+                        sample.name,
+                        &mem[0..mem.len().min(16)]
+                    );
                 }
-                Sample::File { name, .. } => {
-                    info!("Popped Sample::File{{name: \"{:?}\", ..}}", name);
+                Location::File(path) => {
+                    info!(
+                        "Popped sample Sample {{ name: {:?}, data: {:?} }}",
+                        sample.name, path
+                    );
                 }
             }
 
-            let sample_type = match &sample {
-                Sample::Mail(mem) => infer::get(&mem),
-                Sample::Raw(mem) => infer::get(&mem),
-                Sample::File {
-                    data: Location::InMem(mem),
-                    ..
-                } => infer::get(&mem),
-                Sample::File {
-                    data: Location::File(path),
-                    ..
-                } => infer::get_from_path(path)?,
-            };
-            let sample_type_str = sample_type.map(|s| s.mime_type().to_string());
+            let sample_type_str: Option<String> = match &sample.data {
+                Location::InMem(mem) => self.magic_cookie.buffer(&mem),
+                Location::File(path) => self.magic_cookie.file(path),
+            }
+            .map_or_else(|_| None, |s| Some(s));
 
             info!("sample type: {:?}", sample_type_str);
 
@@ -178,26 +200,33 @@ impl Analyzer {
                 unpacking_location: unpacking_loc.path(),
             };
 
-            if let Some(analyzer) = self.sample_analyzers.get(&sample_type_str) {
-                match analyzer(&sample, &context) {
-                    Ok((r, dropped_samples)) => {
-                        debug!("{:?}-analyzer returned: {:?}", sample_type_str, r);
-                        if let Some(dropped_samples) = dropped_samples {
-                            scan_stack.extend(dropped_samples);
-                        }
-                        scan_results.push(r);
-                    }
-                    Err(e) => {
-                        error!(
-                            "{:?}-analyzer failed to analyze {:?}: {:?}",
-                            sample_type_str, sample, e
-                        );
-                    }
-                }
-            } else {
-                error!("No analyzer for \"{:?}\" found!", sample_type_str);
-            }
+            let analyzer = match self.sample_analyzers.get(&sample_type_str) {
+                Some(ana) => ana,
+                None => {
+                    info!(
+                        "No analyzer for {:?} found, using default one!",
+                        sample_type_str
+                    );
 
+                    self.sample_analyzers.get(&None).unwrap()
+                }
+            };
+
+            match analyzer(&sample, &context) {
+                Ok((r, dropped_samples)) => {
+                    debug!("analyzer for {:?} returned: {:?}", sample_type_str, r);
+                    if let Some(dropped_samples) = dropped_samples {
+                        scan_stack.extend(dropped_samples);
+                    }
+                    scan_results.push(r);
+                }
+                Err(e) => {
+                    error!(
+                        "analyzer for {:?} failed to analyze {:?}: {:?}",
+                        sample_type_str, sample, e
+                    );
+                }
+            }
             tempdir_stack.push(unpacking_loc);
         }
 
