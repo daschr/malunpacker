@@ -1,6 +1,6 @@
-use std::str::from_utf8;
-
+use crate::analyzer::Analyzer;
 use icaparse::{Request, SectionType, EMPTY_HEADER};
+use std::str::from_utf8;
 
 macro_rules! str {
     ($s:literal) => {
@@ -58,8 +58,9 @@ impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
     }
 }
 
-pub struct ICAPWorker {
+pub struct ICAPWorker<'a> {
     con: net::TcpStream,
+    analyzer: &'a Analyzer,
 }
 
 pub enum ICAPError {
@@ -86,9 +87,9 @@ impl From<std::io::Error> for ICAPError {
     }
 }
 
-impl ICAPWorker {
-    pub fn new(con: net::TcpStream) -> Self {
-        ICAPWorker { con }
+impl<'w> ICAPWorker<'w> {
+    pub fn new(con: net::TcpStream, analyzer: &'w Analyzer) -> Self {
+        ICAPWorker { con, analyzer }
     }
 
     pub async fn process_msg(&mut self) -> Result<(), ICAPError> {
