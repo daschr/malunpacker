@@ -39,6 +39,7 @@ impl Analyze for SevenZAnalyzer {
                 let sample_list = filelister::list_files(context.unpacking_location, |p| Sample {
                     name: p.to_str().map(|s| String::from(s)),
                     data: Location::File(p),
+                    unpacking_creds: None,
                 })?;
 
                 info!("dropped samples: {:?}", sample_list);
@@ -48,28 +49,32 @@ impl Analyze for SevenZAnalyzer {
             }
             Err(sevenz_rust::Error::PasswordRequired) => {
                 warn!("{:?} needs a password", sample);
-                for pw in context.archive_passwords {
-                    if let Ok(()) = decompress_with_password(
-                        &mut sample_source,
-                        context.unpacking_location,
-                        Password::from(pw.as_str()),
-                    ) {
-                        info!(
-                            "successfully unpacked {:?} using password '{}'",
-                            sample,
-                            pw.as_str()
-                        );
 
-                        let sample_list =
-                            filelister::list_files(context.unpacking_location, |p| Sample {
-                                name: p.to_str().map(|s| String::from(s)),
-                                data: Location::File(p),
-                            })?;
+                if let Some(unpacking_creds) = &sample.unpacking_creds {
+                    for pw in unpacking_creds.as_slice() {
+                        if let Ok(()) = decompress_with_password(
+                            &mut sample_source,
+                            context.unpacking_location,
+                            Password::from(pw.as_str()),
+                        ) {
+                            info!(
+                                "successfully unpacked {:?} using password '{}'",
+                                sample,
+                                pw.as_str()
+                            );
 
-                        if sample_list.is_empty() {
-                            dropped_samples = Some(sample_list);
+                            let sample_list =
+                                filelister::list_files(context.unpacking_location, |p| Sample {
+                                    name: p.to_str().map(|s| String::from(s)),
+                                    data: Location::File(p),
+                                    unpacking_creds: None,
+                                })?;
+
+                            if sample_list.is_empty() {
+                                dropped_samples = Some(sample_list);
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
             }
@@ -143,6 +148,7 @@ impl Analyze for ZipAnalyzer {
                                 Ok(_) => dropped_samples.push(Sample {
                                     name: Some(file.name().to_string()),
                                     data: Location::InMem(file_data),
+                                    unpacking_creds: None,
                                 }),
                                 Err(e) => {
                                     error!("Failed to read data for '{}': {:?}", file.name(), e);
@@ -158,33 +164,40 @@ impl Analyze for ZipAnalyzer {
                     }
 
                     if need_password {
-                        for pw in context.archive_passwords {
-                            match (&mut archive).by_index_decrypt(fileid, pw.as_bytes()) {
-                                Ok(Ok(mut file)) => {
-                                    info!("Would unpack '{}' with password '{}'", file.name(), pw);
+                        if let Some(unpacking_creds) = &sample.unpacking_creds {
+                            for pw in unpacking_creds.as_slice() {
+                                match (&mut archive).by_index_decrypt(fileid, pw.as_bytes()) {
+                                    Ok(Ok(mut file)) => {
+                                        info!(
+                                            "Would unpack '{}' with password '{}'",
+                                            file.name(),
+                                            pw
+                                        );
 
-                                    let mut file_data = Vec::new();
-                                    match file.read_to_end(&mut file_data) {
-                                        Ok(_) => dropped_samples.push(Sample {
-                                            name: Some(file.name().to_string()),
-                                            data: Location::InMem(file_data),
-                                        }),
-                                        Err(e) => {
-                                            error!(
-                                                "Failed to read data for '{}': {:?}",
-                                                file.name(),
-                                                e
-                                            );
+                                        let mut file_data = Vec::new();
+                                        match file.read_to_end(&mut file_data) {
+                                            Ok(_) => dropped_samples.push(Sample {
+                                                name: Some(file.name().to_string()),
+                                                data: Location::InMem(file_data),
+                                                unpacking_creds: None,
+                                            }),
+                                            Err(e) => {
+                                                error!(
+                                                    "Failed to read data for '{}': {:?}",
+                                                    file.name(),
+                                                    e
+                                                );
+                                            }
                                         }
                                     }
-                                }
-                                Ok(Err(_))
-                                | Err(ZipError::UnsupportedArchive(ZipError::PASSWORD_REQUIRED)) => {
-                                    ()
-                                }
-                                Err(e) => {
-                                    error!("Could not unpack sample: {:?}", e);
-                                    break;
+                                    Ok(Err(_))
+                                    | Err(ZipError::UnsupportedArchive(
+                                        ZipError::PASSWORD_REQUIRED,
+                                    )) => (),
+                                    Err(e) => {
+                                        error!("Could not unpack sample: {:?}", e);
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -285,13 +298,14 @@ impl Analyze for MailAnalyzer {
             }
         };
 
-        let mut dropped_sample: Vec<Sample> = Vec::new();
+        let mut dropped_samples: Vec<Sample> = Vec::new();
         for (i, attachment) in mail.attachments().enumerate() {
             info!("attachment {}: {:?}", i, attachment.attachment_name());
-            dropped_sample.push(Sample {
+            dropped_samples.push(Sample {
                 name: attachment.attachment_name().map(|s| s.to_string()),
                 data: Location::InMem(Vec::from(attachment.contents())),
-            })
+                unpacking_creds: None,
+            });
         }
 
         let mut scanner = context.yara_rules.scanner()?;
@@ -315,7 +329,7 @@ impl Analyze for MailAnalyzer {
                     Some(found_rules)
                 },
             },
-            Some(dropped_sample),
+            Some(dropped_samples),
         ))
     }
 
@@ -424,6 +438,7 @@ impl Iso9660Analyzer {
         Some(Sample {
             name: filename.to_str().ok().map(|s| s.to_string()),
             data: Location::InMem(file_data),
+            unpacking_creds: None,
         })
     }
 }

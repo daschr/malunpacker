@@ -45,10 +45,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let anal = Analyzer::new(PathBuf::from(&args[2]).as_path())?;
             println!(
                 "{:?}",
-                anal.analyze(Sample {
-                    name: Some(args[3].clone()),
-                    data: Location::File(PathBuf::from(&args[3]))
-                })?
+                anal.analyze(
+                    Sample {
+                        name: Some(args[3].clone()),
+                        data: Location::File(PathBuf::from(&args[3])),
+                        unpacking_creds: None
+                    },
+                    None
+                )?
             );
         }
         _ => {

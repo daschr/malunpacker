@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::Error as IoError;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::TempDir;
 use yara::{Rules as YaraRules, YaraError};
 
@@ -75,6 +76,7 @@ pub enum Location {
 pub struct Sample {
     pub name: Option<String>,
     pub data: Location,
+    pub unpacking_creds: Option<Arc<Vec<String>>>,
 }
 
 impl Sample {
@@ -94,7 +96,6 @@ pub struct AnalysisResult {
 
 pub struct SampleContext<'a> {
     pub yara_rules: &'a YaraRules,
-    pub archive_passwords: &'a [String],
     pub unpacking_location: &'a Path,
 }
 
@@ -153,8 +154,12 @@ impl Analyzer {
         })
     }
 
-    pub fn analyze(&self, sample: Sample) -> Result<Vec<AnalysisResult>, AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "analyze_raw");
+    pub fn analyze(
+        &self,
+        sample: Sample,
+        forced_mime_type: Option<&str>,
+    ) -> Result<Vec<AnalysisResult>, AnalyzerError> {
+        let c_span = span!(Level::DEBUG, "analyze");
         let _guard = c_span.entered();
 
         let rules_lock = self.yara_ruleset.get_current_rules();
@@ -164,6 +169,7 @@ impl Analyzer {
         let mut tempdir_stack: Vec<TempDir> = Vec::new();
         let mut scan_stack: Vec<Sample> = Vec::new();
         scan_stack.push(sample);
+        let mut first_sample = true;
 
         while !scan_stack.is_empty() {
             let sample = scan_stack.pop().unwrap();
@@ -184,11 +190,23 @@ impl Analyzer {
                 }
             }
 
-            let sample_type_str: Option<String> = match &sample.data {
-                Location::InMem(mem) => self.magic_cookie.buffer(&mem),
-                Location::File(path) => self.magic_cookie.file(path),
-            }
-            .map_or_else(|_| None, |s| Some(s));
+            let sample_type_str: Option<String> = {
+                let r = match &sample.data {
+                    Location::InMem(mem) => self.magic_cookie.buffer(&mem),
+                    Location::File(path) => self.magic_cookie.file(path),
+                }
+                .map_or_else(|_| None, |s| Some(s));
+
+                if first_sample {
+                    first_sample = false;
+                    match forced_mime_type {
+                        Some(t) => Some(t.to_string()),
+                        None => r,
+                    }
+                } else {
+                    r
+                }
+            };
 
             info!("sample type: {:?}", sample_type_str);
 
@@ -196,7 +214,6 @@ impl Analyzer {
             debug!("Created new unpacking location: {:?}", unpacking_loc.path());
             let context = SampleContext {
                 yara_rules: rules_lock.as_ref().unwrap(),
-                archive_passwords: &[],
                 unpacking_location: unpacking_loc.path(),
             };
 

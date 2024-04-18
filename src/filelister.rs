@@ -3,6 +3,7 @@ use std::fs::read_dir;
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[allow(unused)]
 pub fn list_files<R>(dir: &Path, map_fn: fn(PathBuf) -> R) -> io::Result<Vec<R>> {
     let mut files = Vec::new();
     let mut stack: Vec<PathBuf> = Vec::new();
