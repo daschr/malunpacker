@@ -114,7 +114,6 @@ pub trait Analyze {
 
 pub struct Analyzer {
     yara_ruleset: YaraRuleset,
-    magic_cookie: MagicCookie<Load>,
     sample_analyzers: HashMap<Option<String>, AnalyzeFn>,
 }
 
@@ -143,13 +142,8 @@ impl Analyzer {
 
         sample_analyzers.insert(None, RawAnalyzer::analyze);
 
-        let cookie = MagicCookie::open(magic::cookie::Flags::MIME_TYPE)?;
-        let db_paths: DatabasePaths = Default::default();
-        let cookie = cookie.load(&db_paths).expect("Could not load database");
-
         Ok(Analyzer {
             yara_ruleset,
-            magic_cookie: cookie,
             sample_analyzers,
         })
     }
@@ -161,6 +155,10 @@ impl Analyzer {
     ) -> Result<Vec<AnalysisResult>, AnalyzerError> {
         let c_span = span!(Level::DEBUG, "analyze");
         let _guard = c_span.entered();
+
+        let cookie = MagicCookie::open(magic::cookie::Flags::MIME_TYPE)?;
+        let db_paths: DatabasePaths = Default::default();
+        let magic_cookie = cookie.load(&db_paths).expect("Could not load database");
 
         let rules_lock = self.yara_ruleset.get_current_rules();
 
@@ -192,8 +190,8 @@ impl Analyzer {
 
             let sample_type_str: Option<String> = {
                 let r = match &sample.data {
-                    Location::InMem(mem) => self.magic_cookie.buffer(&mem),
-                    Location::File(path) => self.magic_cookie.file(path),
+                    Location::InMem(mem) => magic_cookie.buffer(&mem),
+                    Location::File(path) => magic_cookie.file(path),
                 }
                 .map_or_else(|_| None, |s| Some(s));
 
@@ -211,7 +209,7 @@ impl Analyzer {
             info!("sample type: {:?}", sample_type_str);
 
             let unpacking_loc = TempDir::new()?;
-            debug!("Created new unpacking location: {:?}", unpacking_loc.path());
+            // debug!("Created new unpacking location: {:?}", unpacking_loc.path());
             let context = SampleContext {
                 yara_rules: rules_lock.as_ref().unwrap(),
                 unpacking_location: unpacking_loc.path(),

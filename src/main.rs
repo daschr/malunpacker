@@ -1,15 +1,16 @@
-mod acpi_api;
 mod analyzer;
 mod analyzers;
 mod config;
 mod filelister;
+mod icap_api;
 mod inmem_file;
 mod yara_rulset;
 // mod http_api;
+use std::sync::Arc;
 use tracing::{error, info, span, Level};
 
-use acpi_api::ICAPWorker;
 use analyzer::{Analyzer, Location, Sample};
+use icap_api::ICAPWorker;
 use std::{env, error::Error, net::SocketAddr, path::PathBuf, process};
 
 #[tokio::main]
@@ -32,12 +33,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let c_span = span!(Level::INFO, "main");
     let _g = c_span.enter();
 
-    let analyzer = Analyzer::new(conf.yara_rules_file.as_path())?;
+    let analyzer = Arc::new(Analyzer::new(conf.yara_rules_file.as_path())?);
 
     match args[2].as_str() {
         "serve" => {
             if let Some(icap_api_addr) = conf.icap_api_listen_addr {
-                run_icap(icap_api_addr, &analyzer).await?;
+                run_icap(icap_api_addr, analyzer).await?;
             }
         }
         "scan" => {
@@ -54,7 +55,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         data: Location::File(PathBuf::from(&args[3])),
                         unpacking_creds: None
                     },
-                    None
+                    if args.len() > 4 {
+                        Some(args[4].as_str())
+                    } else {
+                        None
+                    }
                 )?
             );
         }
@@ -67,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run_icap(listen_addr: SocketAddr, analyzer: &Analyzer) -> Result<(), Box<dyn Error>> {
+async fn run_icap(listen_addr: SocketAddr, analyzer: Arc<Analyzer>) -> Result<(), Box<dyn Error>> {
     let socket = tokio::net::TcpListener::bind(listen_addr)
         .await
         .expect("Could not open socket");
@@ -75,9 +80,9 @@ async fn run_icap(listen_addr: SocketAddr, analyzer: &Analyzer) -> Result<(), Bo
     loop {
         let (stream, addr) = socket.accept().await?;
         println!("[{:?}]", addr);
-
+        let c_ana = analyzer.clone();
         tokio::spawn(async move {
-            let mut worker = ICAPWorker::new(stream, analyzer);
+            let mut worker = ICAPWorker::new(stream, c_ana.as_ref());
             while let Ok(_) = worker.process_msg().await {}
         });
     }

@@ -10,6 +10,7 @@ use mail_parser::{MessageParser, MimeHeaders};
 use sevenz_rust::{decompress_with_password, Password};
 use std::ffi::{c_void, CStr, CString};
 use std::io::Read;
+use std::sync::Arc;
 
 use tracing::{debug, error, info, span, warn, Level};
 use zip::{result::ZipError, ZipArchive};
@@ -138,7 +139,6 @@ impl Analyze for ZipAnalyzer {
                     match (&mut archive).by_index(fileid) {
                         Ok(mut file) => {
                             if file.is_dir() {
-                                debug!("Skipping \"{}\", since it's a directory", file.name());
                                 continue;
                             }
 
@@ -168,19 +168,20 @@ impl Analyze for ZipAnalyzer {
                             for pw in unpacking_creds.as_slice() {
                                 match (&mut archive).by_index_decrypt(fileid, pw.as_bytes()) {
                                     Ok(Ok(mut file)) => {
-                                        info!(
-                                            "Would unpack '{}' with password '{}'",
-                                            file.name(),
-                                            pw
-                                        );
-
                                         let mut file_data = Vec::new();
                                         match file.read_to_end(&mut file_data) {
-                                            Ok(_) => dropped_samples.push(Sample {
-                                                name: Some(file.name().to_string()),
-                                                data: Location::InMem(file_data),
-                                                unpacking_creds: None,
-                                            }),
+                                            Ok(_) => {
+                                                info!("Successfully decrypted '{}' with password '{}'",
+                                                    file.name(),
+                                                    pw
+                                                );
+                                                dropped_samples.push(Sample {
+                                                    name: Some(file.name().to_string()),
+                                                    data: Location::InMem(file_data),
+                                                    unpacking_creds: None,
+                                                });
+                                                break;
+                                            }
                                             Err(e) => {
                                                 error!(
                                                     "Failed to read data for '{}': {:?}",
@@ -205,7 +206,7 @@ impl Analyze for ZipAnalyzer {
                 }
             }
             Err(e) => {
-                error!("Could not open {:?} as a zip archive: {:?}", &sample, e);
+                error!("Could not open {:?} as a zip archive: {:?}", sample.name, e);
             }
         }
 
@@ -298,13 +299,20 @@ impl Analyze for MailAnalyzer {
             }
         };
 
+        let possible_passwords: Option<Arc<Vec<String>>> = if let Some(body) = mail.body_text(0) {
+            let passwords: Vec<String> = body.split_whitespace().map(|s| s.to_string()).collect();
+            Some(Arc::new(passwords))
+        } else {
+            None
+        };
+
         let mut dropped_samples: Vec<Sample> = Vec::new();
         for (i, attachment) in mail.attachments().enumerate() {
             info!("attachment {}: {:?}", i, attachment.attachment_name());
             dropped_samples.push(Sample {
                 name: attachment.attachment_name().map(|s| s.to_string()),
                 data: Location::InMem(Vec::from(attachment.contents())),
-                unpacking_creds: None,
+                unpacking_creds: possible_passwords.clone(),
             });
         }
 
