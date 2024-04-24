@@ -1,6 +1,9 @@
-use crate::analyzer::Analyzer;
+use crate::analyzer::{Analyzer, Location, Sample};
 use icaparse::{Request, SectionType, EMPTY_HEADER};
+
 use std::str::from_utf8;
+
+use tracing::{debug, error, info, span, Level};
 
 macro_rules! str {
     ($s:literal) => {
@@ -10,7 +13,8 @@ macro_rules! str {
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    net,
+    net::{self, TcpStream},
+    sync::mpsc::{Receiver, Sender},
 };
 
 trait AsStr {
@@ -59,10 +63,11 @@ impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
 }
 
 pub struct ICAPWorker<'a> {
-    con: net::TcpStream,
+    stream_rx: Receiver<TcpStream>,
     analyzer: &'a Analyzer,
 }
 
+#[derive(Debug)]
 pub enum ICAPError {
     SocketError(tokio::io::ErrorKind),
     IoError(std::io::Error),
@@ -88,17 +93,41 @@ impl From<std::io::Error> for ICAPError {
 }
 
 impl<'w> ICAPWorker<'w> {
-    pub fn new(con: net::TcpStream, analyzer: &'w Analyzer) -> Self {
-        ICAPWorker { con, analyzer }
+    pub fn new(stream_rx: Receiver<TcpStream>, analyzer: &'w Analyzer) -> Self {
+        ICAPWorker {
+            stream_rx,
+
+            analyzer,
+        }
     }
 
-    pub async fn process_msg(&mut self) -> Result<(), ICAPError> {
+    pub async fn run(&mut self) {
+        let span = span!(Level::DEBUG, "ICAPWorker");
+        let _guard = span.enter();
+
+        info!("Awaiting stream...");
+        while let Some(mut stream) = self.stream_rx.recv().await {
+            info!("Got {:?}", &stream);
+            loop {
+                if let Err(e) = self.process_msg(&mut stream).await {
+                    error!("[{:?}] ICAP error: {:?}", stream, e);
+                    break;
+                }
+            }
+            info!("[{:?}] closed", stream);
+        }
+    }
+
+    async fn process_msg(&mut self, con: &mut TcpStream) -> Result<(), ICAPError> {
+        let c_span = span!(Level::DEBUG, "process_msg");
+        let _guard = c_span.enter();
+
         let mut recv_buf = [0u8; 512];
 
         let mut buf: Vec<u8> = Vec::new();
 
         loop {
-            let nbytes = match self.con.read(&mut recv_buf).await {
+            let nbytes = match con.read(&mut recv_buf).await {
                 Ok(0) => {
                     return Err(tokio::io::ErrorKind::BrokenPipe.into());
                 }
@@ -118,25 +147,36 @@ impl<'w> ICAPWorker<'w> {
                 if req.method.is_none() {
                     let resp: String = ICAPResponse::with_code_reason(204, "no mod needed").into();
 
-                    self.con.write_all(resp.as_bytes()).await?;
+                    con.write_all(resp.as_bytes()).await?;
                     break;
                 }
 
                 match req.method.unwrap() {
                     "OPTIONS" => {
+                        info!("Received OPTIONS");
                         let resp: String =
                             ICAPResponse::new(200, Some("ok"), &[("Methods", "RESPMOD")]).into();
 
-                        self.con.write_all(resp.as_bytes()).await?;
+                        con.write_all(resp.as_bytes()).await?;
                     }
                     "RESPMOD" => {
-                        if let Some(mail) = self.get_mail(&req).await {
-                            match from_utf8(&mail) {
-                                Ok(m) => {
-                                    println!("mail:\n{}", m);
+                        info!("Received RESPMOD");
+                        if let Some(mail) = self.get_mail(con, &req).await {
+                            let sample = Sample {
+                                name: Some(str!("mail")),
+                                data: Location::InMem(mail),
+                                unpacking_creds: None,
+                            };
+
+                            info!("Analyzing...");
+                            match self.analyzer.analyze(sample, Some("message/rfc822")) {
+                                Ok(results) => {
+                                    if !results.is_empty() {
+                                        debug!("Found results: {:?}", results);
+                                    }
                                 }
                                 Err(e) => {
-                                    println!("Error decoding mail: {:?}", e);
+                                    error!("Analyzer error: {:?}", e);
                                 }
                             }
                         }
@@ -144,13 +184,13 @@ impl<'w> ICAPWorker<'w> {
                         let resp: String =
                             ICAPResponse::with_code_reason(204, "no mod needed").into();
 
-                        self.con.write_all(resp.as_bytes()).await?;
+                        con.write_all(resp.as_bytes()).await?;
                     }
                     _ => {
                         let resp: String =
                             ICAPResponse::with_code_reason(204, "no mod needed").into();
 
-                        self.con.write_all(resp.as_bytes()).await?;
+                        con.write_all(resp.as_bytes()).await?;
                     }
                 }
                 break;
@@ -191,7 +231,11 @@ impl<'w> ICAPWorker<'w> {
         None
     }
 
-    async fn get_mail<'a, 'b>(&'a mut self, req: &Request<'b, 'b>) -> Option<Vec<u8>> {
+    async fn get_mail<'a, 'b>(
+        &'a mut self,
+        con: &mut TcpStream,
+        req: &Request<'b, 'b>,
+    ) -> Option<Vec<u8>> {
         let mail_length = match Self::get_mail_length(&req) {
             Some(l) => l,
             None => {
@@ -199,16 +243,15 @@ impl<'w> ICAPWorker<'w> {
             }
         };
 
-        // println!("\nsections: {:?}", req.encapsulated_sections);
-        if let Some(sections) = req.encapsulated_sections.as_ref() {
-            for (sec, sectval) in sections.iter() {
-                println!("sec: {}", sec.as_str());
-                match from_utf8(&sectval) {
-                    Ok(b) => println!("{}", b),
-                    Err(e) => println!("Error dec: {:?}\n{:?}", e, sectval),
-                }
-            }
-        }
+        // if let Some(sections) = req.encapsulated_sections.as_ref() {
+        //     for (sec, sectval) in sections.iter() {
+        //         println!("sec: {}", sec.as_str());
+        //         match from_utf8(&sectval) {
+        //             Ok(b) => println!("{}", b),
+        //             Err(e) => println!("Error dec: {:?}\n{:?}", e, sectval),
+        //         }
+        //     }
+        // }
 
         let mut mail: Vec<u8> = Vec::new();
 
@@ -223,7 +266,7 @@ impl<'w> ICAPWorker<'w> {
 
         let diff_length = mail_length - mail.len();
 
-        if self.con.read_to_vec(&mut mail, diff_length).await.is_ok() {
+        if con.read_to_vec(&mut mail, diff_length).await.is_ok() {
             return Some(mail);
         }
 

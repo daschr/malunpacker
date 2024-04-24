@@ -12,6 +12,11 @@ use tracing::{error, info, span, Level};
 use analyzer::{Analyzer, Location, Sample};
 use icap_api::ICAPWorker;
 use std::{env, error::Error, net::SocketAddr, path::PathBuf, process};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{channel, Sender},
+    task::JoinHandle,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -37,9 +42,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match args[2].as_str() {
         "serve" => {
-            if let Some(icap_api_addr) = conf.icap_api_listen_addr {
-                run_icap(icap_api_addr, analyzer).await?;
-            }
+            run_icap(
+                conf.icap_api_listen_addr
+                    .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
+                analyzer,
+                conf.icap_num_workers.unwrap_or(8),
+            )
+            .await?;
         }
         "scan" => {
             if args.len() < 4 {
@@ -72,18 +81,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run_icap(listen_addr: SocketAddr, analyzer: Arc<Analyzer>) -> Result<(), Box<dyn Error>> {
+async fn run_icap(
+    listen_addr: SocketAddr,
+    analyzer: Arc<Analyzer>,
+    num_workers: usize,
+) -> Result<(), Box<dyn Error>> {
+    let c_span = span!(Level::DEBUG, "ICAP");
+    let _guard = c_span.enter();
+
     let socket = tokio::net::TcpListener::bind(listen_addr)
         .await
         .expect("Could not open socket");
 
+    let mut workers: Vec<(JoinHandle<()>, Sender<TcpStream>)> = Vec::new();
+
+    for _ in 0..num_workers {
+        let (tx, rx) = channel(100);
+
+        let c_ana = analyzer.clone();
+        let handle = tokio::spawn(async move {
+            let mut worker = ICAPWorker::new(rx, c_ana.as_ref());
+            worker.run().await;
+        });
+
+        workers.push((handle, tx));
+    }
+
+    let mut c_worker = 0usize;
+
     loop {
         let (stream, addr) = socket.accept().await?;
+
         println!("[{:?}]", addr);
-        let c_ana = analyzer.clone();
-        tokio::spawn(async move {
-            let mut worker = ICAPWorker::new(stream, c_ana.as_ref());
-            while let Ok(_) = worker.process_msg().await {}
-        });
+        if let Err(e) = workers.as_mut_slice()[c_worker].1.send(stream).await {
+            error!("Could not enqueue stream into worker {}: {:?}", c_worker, e);
+        }
+        c_worker = (c_worker + 1) % num_workers;
     }
 }

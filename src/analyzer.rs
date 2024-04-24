@@ -11,7 +11,7 @@ use yara::{Rules as YaraRules, YaraError};
 use crate::analyzers::*;
 use crate::inmem_file::{InMemFile, ReadAndSeek};
 use crate::yara_rulset::YaraRuleset;
-use magic::cookie::{DatabasePaths, Load};
+use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;
 use tracing::{debug, error, info, span, Level};
 

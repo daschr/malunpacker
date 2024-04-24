@@ -9,6 +9,7 @@ use tracing::{debug, error, info, span, Level};
 #[derive(Deserialize)]
 pub struct Config {
     pub icap_api_listen_addr: Option<SocketAddr>,
+    pub icap_num_workers: Option<usize>,
     pub http_api_listen_addr: Option<SocketAddr>,
     pub yara_rules_file: PathBuf,
 }
