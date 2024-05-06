@@ -25,14 +25,21 @@ use tokio::{
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 3 {
-        println!("Usage: {} [conf file] (scan [file]|serve)", args[0]);
+    if args.len() < 2 {
+        eprintln!("Usage: {} [scan [file]|serve [config]|ask [file])", args[0]);
         process::exit(1);
     }
 
     println!("Starting");
 
-    let conf = config::Config::read_from_file(PathBuf::from(&args[1]).as_path())?;
+    let conf = if env::var("CONF_FROM_ENV").is_ok_and(|s| s.to_lowercase() == "true") {
+        config::Config::read_from_env()?
+    } else {
+        if args.len() < 3 {
+            eprintln!("Missing config file (or missed CONF_FROM_ENV=true)!");
+        }
+        config::Config::read_from_file(PathBuf::from(&args[1]).as_path())?
+    };
 
     let _g: Option<ClientInitGuard> = if let Some(sentry_endpoint_rule) = conf.sentry_endpoint_url {
         Some(sentry::init((
