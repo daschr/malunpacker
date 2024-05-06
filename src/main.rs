@@ -24,15 +24,10 @@ use tokio::{
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() < 2 {
-        eprintln!("Usage: {} [scan [file]|serve (config)|ask (file)]", args[0]);
-        process::exit(1);
-    }
-
     let conf = if env::var("CONF_FROM_ENV").is_ok_and(|s| s.to_lowercase() == "true") {
         config::Config::read_from_env()?
     } else {
-        if args.len() < 3 {
+        if args.len() < 2 {
             eprintln!("Missing config file (or missed CONF_FROM_ENV=true)!");
         }
         config::Config::read_from_file(PathBuf::from(&args[1]).as_path())?
@@ -60,60 +55,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let analyzer = Arc::new(Analyzer::new(conf.yara_rules_file.as_path())?);
 
-    match args[2].as_str() {
-        "serve" => {
-            info!("Serving ICAP...");
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(run_icap(
-                    conf.icap_api_listen_addr
-                        .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
-                    analyzer,
-                    conf.icap_num_workers.unwrap_or(8),
-                ))
-                .expect("Failed to initialize tokio runtime");
-        }
-        "scan" => {
-            if args.len() < 4 {
-                // error!("Missing file to scan!");
-                process::exit(1);
-            }
-
-            info!(
-                "{:?}",
-                analyzer.analyze(
-                    Sample {
-                        name: Some(args[3].clone()),
-                        data: Location::File(PathBuf::from(&args[3])),
-                        unpacking_creds: None
-                    },
-                    if args.len() > 4 {
-                        Some(args[4].as_str())
-                    } else {
-                        None
-                    }
-                )?
-            );
-        }
-        "ask" => {
-            if args.len() < 4 {
-                error!("{} [file]", args[0]);
-                process::exit(1);
-            }
-
-            let payload = String::from_utf8(fs::read(&args[3])?)?;
-            println!("payload: \n{}", payload);
-            let ex = CredentialExtractor::new()?;
-
-            println!("res: {:?}", ex.get_creds(payload));
-        }
-        _ => {
-            error!("Unknown command '{}'", args[1]);
-            process::exit(1);
-        }
-    }
+    info!("Serving ICAP...");
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(run_icap(
+            conf.icap_api_listen_addr
+                .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
+            analyzer,
+            conf.icap_num_workers.unwrap_or(8),
+        ))
+        .expect("Failed to initialize tokio runtime");
 
     info!("Exited");
     Ok(())
