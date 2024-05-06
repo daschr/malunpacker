@@ -22,7 +22,7 @@ ENV LIBTORCH=/src/malunpacker/libtorch
 RUN cargo b --release && cp target/*/malunpacker .
 
 FROM debian:bookworm as malunpacker_rootfs
-RUN apt update && apt install -y libiso9660-11 libcdio19 libudf0 libyara9 libgomp1 && apt clean
+RUN apt update && apt install -y libiso9660-11 libcdio19 libudf0 libyara9 libgomp1 libclang1-14 && apt clean
 RUN mkdir -p /etc/malunpacker 
 COPY --from=build /src/malunpacker/malunpacker /bin/malunpacker
 COPY --from=build /src/malunpacker/libtorch /opt/libtorch
