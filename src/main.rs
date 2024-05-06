@@ -26,11 +26,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} [scan [file]|serve [config]|ask [file])", args[0]);
+        eprintln!("Usage: {} [scan [file]|serve (config)|ask (file)]", args[0]);
         process::exit(1);
     }
 
-    println!("Starting...");
     let conf = if env::var("CONF_FROM_ENV").is_ok_and(|s| s.to_lowercase() == "true") {
         config::Config::read_from_env()?
     } else {

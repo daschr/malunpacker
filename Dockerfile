@@ -8,7 +8,7 @@ RUN apt update && apt install -y curl libcdio-dev libiso9660-dev libudf-dev liby
 
 COPY Cargo.toml /src/malunpacker/
 RUN mkdir /src/malunpacker/src
-RUN echo 'fn main() {}' >/src/malunpacker/src/main.rs
+RUN echo 'fn main() {println!("stub!");}' >/src/malunpacker/src/main.rs
 ENV LD_LIBRARY_PATH=/src/malunpacker/libtorch/lib
 ENV LIBTORCH=/src/malunpacker/libtorch
 RUN cargo b --release 
@@ -21,7 +21,7 @@ ENV LD_LIBRARY_PATH=/src/malunpacker/libtorch/lib
 ENV LIBTORCH=/src/malunpacker/libtorch
 RUN cargo b --release && cp target/*/malunpacker .
 
-FROM debian:bookworm as malunpacker_rootfs
+FROM debian:bookworm as malunpacker
 RUN apt update && apt install -y libiso9660-11 libcdio19 libudf0 libyara9 libgomp1 libclang1-14 && apt clean
 RUN mkdir -p /etc/malunpacker 
 COPY --from=build /src/malunpacker/malunpacker /bin/malunpacker
