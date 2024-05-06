@@ -1,12 +1,14 @@
 mod analyzer;
 mod analyzers;
 mod config;
+mod credential_extractor;
 mod filelister;
 mod icap_api;
 mod inmem_file;
 mod yara_rulset;
 // mod http_api;
-use std::sync::Arc;
+use credential_extractor::CredentialExtractor;
+use std::{fs, sync::Arc};
 use tracing::{error, info, span, Level};
 
 use analyzer::{Analyzer, Location, Sample};
@@ -30,9 +32,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let conf = config::Config::read_from_file(PathBuf::from(&args[1]).as_path())?;
 
     tracing_subscriber::fmt()
-        .pretty()
         .with_thread_names(true)
-        .with_max_level(tracing::Level::TRACE)
+        .with_thread_ids(true)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     let c_span = span!(Level::INFO, "main");
@@ -52,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         "scan" => {
             if args.len() < 4 {
-                error!("Missing file to scan!");
+                // error!("Missing file to scan!");
                 process::exit(1);
             }
 
@@ -71,6 +73,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 )?
             );
+        }
+        "ask" => {
+            if args.len() < 4 {
+                error!("{} [file]", args[0]);
+                process::exit(1);
+            }
+
+            let payload = String::from_utf8(fs::read(&args[3])?)?;
+            println!("payload: \n{}", payload);
+            let ex = CredentialExtractor::new()?;
+
+            println!("res: {:?}", ex.get_creds(payload));
         }
         _ => {
             error!("Unknown command '{}'", args[1]);

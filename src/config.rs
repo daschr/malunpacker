@@ -4,7 +4,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::from_utf8;
-use tracing::{debug, error, info, span, Level};
+use tracing::{debug, span, Level};
 
 #[derive(Deserialize)]
 pub struct Config {

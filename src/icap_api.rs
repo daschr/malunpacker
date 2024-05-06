@@ -13,8 +13,8 @@ macro_rules! str {
 
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    net::{self, TcpStream},
-    sync::mpsc::{Receiver, Sender},
+    net::TcpStream,
+    sync::mpsc::Receiver,
 };
 
 trait AsStr {
@@ -55,6 +55,9 @@ impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
             let tbr = 512.min(length - read_bytes);
 
             let r = self.read(&mut buf[..tbr]).await?;
+            if r == 0 {
+                break;
+            }
             vec.extend_from_slice(&buf[..r]);
             read_bytes += r;
         }
@@ -161,6 +164,8 @@ impl<'w> ICAPWorker<'w> {
                     }
                     "RESPMOD" => {
                         info!("Received RESPMOD");
+
+                        let mut matched_rule = None;
                         if let Some(mail) = self.get_mail(con, &req).await {
                             let sample = Sample {
                                 name: Some(str!("mail")),
@@ -169,10 +174,18 @@ impl<'w> ICAPWorker<'w> {
                             };
 
                             info!("Analyzing...");
+
                             match self.analyzer.analyze(sample, Some("message/rfc822")) {
                                 Ok(results) => {
                                     if !results.is_empty() {
                                         debug!("Found results: {:?}", results);
+                                        for res in &results {
+                                            if let Some(matched_rules) = &res.matched_yara_rules {
+                                                if !matched_rules.is_empty() {
+                                                    matched_rule = Some(matched_rules[0].clone());
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -181,8 +194,18 @@ impl<'w> ICAPWorker<'w> {
                             }
                         }
 
-                        let resp: String =
-                            ICAPResponse::with_code_reason(204, "no mod needed").into();
+                        let resp: String = match matched_rule {
+                            Some(r) => ICAPResponse::new(
+                                200,
+                                Some("Infection found"),
+                                &[(
+                                    "X-Infection-Found",
+                                    &format!("Type=0; Resolution=2; Threat={r}"),
+                                )],
+                            )
+                            .into(),
+                            None => ICAPResponse::with_code_reason(204, "no mod needed").into(),
+                        };
 
                         con.write_all(resp.as_bytes()).await?;
                     }
@@ -299,6 +322,7 @@ impl ICAPResponse {
         }
     }
 
+    #[allow(unused)]
     fn with_code(code: u16) -> Self {
         ICAPResponse {
             code,

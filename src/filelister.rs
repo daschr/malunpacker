@@ -1,7 +1,9 @@
-struct FileLister;
 use std::fs::read_dir;
 use std::io;
 use std::path::{Path, PathBuf};
+
+#[allow(unused)]
+struct FileLister;
 
 #[allow(unused)]
 pub fn list_files<R>(dir: &Path, map_fn: fn(PathBuf) -> R) -> io::Result<Vec<R>> {

@@ -1,4 +1,5 @@
 use crate::analyzer::{AnalysisResult, Analyze, AnalyzerError, Location, Sample, SampleContext};
+use crate::credential_extractor::CredentialExtractor;
 use crate::filelister;
 use libcdio_sys::{
     _cdio_list_begin, _cdio_list_free, _cdio_list_node_data, _cdio_list_node_next, iso9660_close,
@@ -12,7 +13,7 @@ use std::ffi::{c_void, CStr, CString};
 use std::io::Read;
 use std::sync::Arc;
 
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{error, info, span, warn, Level};
 use zip::{result::ZipError, ZipArchive};
 
 pub struct SevenZAnalyzer();
@@ -53,11 +54,13 @@ impl Analyze for SevenZAnalyzer {
 
                 if let Some(unpacking_creds) = &sample.unpacking_creds {
                     for pw in unpacking_creds.as_slice() {
-                        if let Ok(()) = decompress_with_password(
+                        if decompress_with_password(
                             &mut sample_source,
                             context.unpacking_location,
                             Password::from(pw.as_str()),
-                        ) {
+                        )
+                        .is_ok()
+                        {
                             info!(
                                 "successfully unpacked {:?} using password '{}'",
                                 sample,
@@ -144,15 +147,12 @@ impl Analyze for ZipAnalyzer {
 
                             info!("Would unpack '{}'", file.name());
                             let mut file_data = Vec::new();
-                            match file.read_to_end(&mut file_data) {
-                                Ok(_) => dropped_samples.push(Sample {
+                            if file.read_to_end(&mut file_data).is_ok() {
+                                dropped_samples.push(Sample {
                                     name: Some(file.name().to_string()),
                                     data: Location::InMem(file_data),
                                     unpacking_creds: None,
-                                }),
-                                Err(e) => {
-                                    error!("Failed to read data for '{}': {:?}", file.name(), e);
-                                }
+                                });
                             }
                         }
                         Err(ZipError::UnsupportedArchive(ZipError::PASSWORD_REQUIRED)) => {
@@ -169,26 +169,18 @@ impl Analyze for ZipAnalyzer {
                                 match (&mut archive).by_index_decrypt(fileid, pw.as_bytes()) {
                                     Ok(Ok(mut file)) => {
                                         let mut file_data = Vec::new();
-                                        match file.read_to_end(&mut file_data) {
-                                            Ok(_) => {
-                                                info!("Successfully decrypted '{}' with password '{}'",
-                                                    file.name(),
-                                                    pw
-                                                );
-                                                dropped_samples.push(Sample {
-                                                    name: Some(file.name().to_string()),
-                                                    data: Location::InMem(file_data),
-                                                    unpacking_creds: None,
-                                                });
-                                                break;
-                                            }
-                                            Err(e) => {
-                                                error!(
-                                                    "Failed to read data for '{}': {:?}",
-                                                    file.name(),
-                                                    e
-                                                );
-                                            }
+                                        if file.read_to_end(&mut file_data).is_ok() {
+                                            info!(
+                                                "Successfully decrypted '{}' with password '{}'",
+                                                file.name(),
+                                                pw
+                                            );
+                                            dropped_samples.push(Sample {
+                                                name: Some(file.name().to_string()),
+                                                data: Location::InMem(file_data),
+                                                unpacking_creds: None,
+                                            });
+                                            break;
                                         }
                                     }
                                     Ok(Err(_))
@@ -287,6 +279,9 @@ impl Analyze for MailAnalyzer {
         sample: &Sample,
         context: &SampleContext,
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
+        let c_span = span!(Level::DEBUG, "MailAnalyzer");
+        let _guard = c_span.enter();
+
         let mail_content = match &sample.data {
             Location::InMem(mem) => mem.clone(),
             Location::File(path) => std::fs::read(path)?,
@@ -299,16 +294,25 @@ impl Analyze for MailAnalyzer {
             }
         };
 
-        let possible_passwords: Option<Arc<Vec<String>>> = if let Some(body) = mail.body_text(0) {
-            let passwords: Vec<String> = body.split_whitespace().map(|s| s.to_string()).collect();
-            Some(Arc::new(passwords))
-        } else {
-            None
-        };
-
+        let mut possible_passwords: Option<Arc<Vec<String>>> = None;
         let mut dropped_samples: Vec<Sample> = Vec::new();
         for (i, attachment) in mail.attachments().enumerate() {
             info!("attachment {}: {:?}", i, attachment.attachment_name());
+            if possible_passwords.is_none() {
+                possible_passwords = if let Some(body) = mail.body_text(0) {
+                    let mut passwords: Vec<String> =
+                        body.split_whitespace().map(|s| s.to_string()).collect();
+
+                    if let Ok(credential_extractor) = CredentialExtractor::new() {
+                        if let Ok(Some(pw)) = credential_extractor.get_creds(body.to_string()) {
+                            passwords.push(pw);
+                        }
+                    }
+                    Some(Arc::new(passwords))
+                } else {
+                    None
+                };
+            }
             dropped_samples.push(Sample {
                 name: attachment.attachment_name().map(|s| s.to_string()),
                 data: Location::InMem(Vec::from(attachment.contents())),

@@ -11,6 +11,7 @@ use yara::{Rules as YaraRules, YaraError};
 use crate::analyzers::*;
 use crate::inmem_file::{InMemFile, ReadAndSeek};
 use crate::yara_rulset::YaraRuleset;
+
 use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;
 use tracing::{debug, error, info, span, Level};
@@ -63,6 +64,12 @@ impl From<magic::cookie::OpenError> for AnalyzerError {
 impl From<magic::cookie::Error> for AnalyzerError {
     fn from(value: magic::cookie::Error) -> Self {
         AnalyzerError::Other(Box::new(value))
+    }
+}
+
+impl From<anyhow::Error> for AnalyzerError {
+    fn from(value: anyhow::Error) -> Self {
+        AnalyzerError::Other(value.into())
     }
 }
 
@@ -153,9 +160,6 @@ impl Analyzer {
         sample: Sample,
         forced_mime_type: Option<&str>,
     ) -> Result<Vec<AnalysisResult>, AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "analyze");
-        let _guard = c_span.entered();
-
         let cookie = MagicCookie::open(magic::cookie::Flags::MIME_TYPE)?;
         let db_paths: DatabasePaths = Default::default();
         let magic_cookie = cookie.load(&db_paths).expect("Could not load database");
@@ -175,7 +179,7 @@ impl Analyzer {
             match &sample.data {
                 Location::InMem(mem) => {
                     info!(
-                        "Popped sample Sample {{ name: {:?}, data: {:?} }}",
+                        "Popped sample Sample {{ name: {:?}, data: {:x?} }}",
                         sample.name,
                         &mem[0..mem.len().min(16)]
                     );
