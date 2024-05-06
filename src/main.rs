@@ -44,6 +44,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match args[2].as_str() {
         "serve" => {
+            info!("Serving ICAP...");
             run_icap(
                 conf.icap_api_listen_addr
                     .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
@@ -92,6 +93,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    info!("Exited");
     Ok(())
 }
 
