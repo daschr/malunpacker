@@ -8,6 +8,7 @@ mod inmem_file;
 mod yara_rulset;
 // mod http_api;
 use credential_extractor::CredentialExtractor;
+use sentry::ClientInitGuard;
 use std::{fs, sync::Arc};
 use tracing::{error, info, span, Level};
 
@@ -20,22 +21,35 @@ use tokio::{
     task::JoinHandle,
 };
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+// #[tokio::main]
+fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 3 {
-        eprintln!("Usage: {} [conf file] (scan [file]|serve)", args[0]);
+        println!("Usage: {} [conf file] (scan [file]|serve)", args[0]);
         process::exit(1);
     }
 
+    println!("Starting");
+
     let conf = config::Config::read_from_file(PathBuf::from(&args[1]).as_path())?;
 
-    tracing_subscriber::fmt()
-        .with_thread_names(true)
-        .with_thread_ids(true)
-        .with_max_level(tracing::Level::INFO)
-        .init();
+    let _g: Option<ClientInitGuard> = if let Some(sentry_endpoint_rule) = conf.sentry_endpoint_url {
+        Some(sentry::init((
+            sentry_endpoint_rule,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                ..Default::default()
+            },
+        )))
+    } else {
+        tracing_subscriber::fmt()
+            .with_thread_names(true)
+            .with_thread_ids(true)
+            .with_max_level(tracing::Level::INFO)
+            .init();
+        None
+    };
 
     let c_span = span!(Level::INFO, "main");
     let _g = c_span.enter();
@@ -45,13 +59,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match args[2].as_str() {
         "serve" => {
             info!("Serving ICAP...");
-            run_icap(
-                conf.icap_api_listen_addr
-                    .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
-                analyzer,
-                conf.icap_num_workers.unwrap_or(8),
-            )
-            .await?;
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(run_icap(
+                    conf.icap_api_listen_addr
+                        .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
+                    analyzer,
+                    conf.icap_num_workers.unwrap_or(8),
+                ))
+                .expect("Failed to initialize tokio runtime");
         }
         "scan" => {
             if args.len() < 4 {
@@ -94,6 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     info!("Exited");
+    println!("Exited");
     Ok(())
 }
 

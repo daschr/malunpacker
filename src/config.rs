@@ -12,6 +12,7 @@ pub struct Config {
     pub icap_num_workers: Option<usize>,
     pub http_api_listen_addr: Option<SocketAddr>,
     pub yara_rules_file: PathBuf,
+    pub sentry_endpoint_url: Option<String>,
 }
 
 impl Config {

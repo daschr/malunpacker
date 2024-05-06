@@ -14,7 +14,7 @@ use crate::yara_rulset::YaraRuleset;
 
 use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;
-use tracing::{debug, error, info, span, Level};
+use tracing::{debug, error, info};
 
 macro_rules! wrap_err {
     ($err:ident, $enum:ident) => {
