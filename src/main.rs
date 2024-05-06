@@ -30,6 +30,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     }
 
+    println!("Starting...");
+
     let conf = if env::var("CONF_FROM_ENV").is_ok_and(|s| s.to_lowercase() == "true") {
         config::Config::read_from_env()?
     } else {
