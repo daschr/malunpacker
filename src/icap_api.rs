@@ -187,6 +187,7 @@ impl<'w> ICAPWorker<'w> {
                                             if let Some(matched_rules) = &res.matched_yara_rules {
                                                 if !matched_rules.is_empty() {
                                                     matched_rule = Some(matched_rules[0].clone());
+                                                    info!("FOUND: {:?}", matched_rule);
                                                 }
                                             }
                                         }
