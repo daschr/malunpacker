@@ -106,22 +106,30 @@ impl<'w> ICAPWorker<'w> {
     }
 
     pub async fn run(&mut self) {
-        let span = span!(Level::DEBUG, "ICAPWorker");
-        let _guard = span.enter();
-
         info!("Awaiting stream...");
         while let Some(mut stream) = self.stream_rx.recv().await {
-            info!("Got {:?}", &stream);
+            let peer_addr = stream.peer_addr().unwrap().to_string();
+            info!("Got connection from {:?}", peer_addr);
+
+            let span = span!(Level::DEBUG, "ICAPWorker", peer = peer_addr);
+            let _guard = span.enter();
+
             let start_ts = Instant::now();
             loop {
-                if let Err(e) = self.process_msg(&mut stream).await {
-                    error!("[{:?}] ICAP error: {:?}", stream, e);
-                    break;
+                match self.process_msg(&mut stream).await {
+                    Ok(_) => (),
+                    Err(ICAPError::SocketError(tokio::io::ErrorKind::BrokenPipe)) => {
+                        break;
+                    }
+                    Err(e) => {
+                        error!("[{:?}] ICAP error: {:?}", stream, e);
+                        break;
+                    }
                 }
             }
             let dur = Instant::now().duration_since(start_ts);
 
-            info!("Session of [{:?}] took {}ms", stream, dur.as_millis());
+            info!("Session of [{:?}] took {}ms", peer_addr, dur.as_millis());
         }
     }
 
@@ -187,7 +195,7 @@ impl<'w> ICAPWorker<'w> {
                                             if let Some(matched_rules) = &res.matched_yara_rules {
                                                 if !matched_rules.is_empty() {
                                                     matched_rule = Some(matched_rules[0].clone());
-                                                    info!("FOUND: {:?}", matched_rule);
+                                                    info!("FOUND: {:?}", matched_rules);
                                                 }
                                             }
                                         }
