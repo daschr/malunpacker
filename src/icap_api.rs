@@ -3,7 +3,7 @@ use icaparse::{Request, SectionType, EMPTY_HEADER};
 
 use std::str::from_utf8;
 
-use tracing::{debug, error, info, span, Level};
+use tracing::{debug, error, info, info_span, Instrument};
 
 macro_rules! str {
     ($s:literal) => {
@@ -106,37 +106,32 @@ impl<'w> ICAPWorker<'w> {
     }
 
     pub async fn run(&mut self) {
-        info!("Awaiting stream...");
         while let Some(mut stream) = self.stream_rx.recv().await {
             let peer_addr = stream.peer_addr().unwrap().to_string();
-            info!("Got connection from {:?}", peer_addr);
-
-            let span = span!(Level::DEBUG, "ICAPWorker", peer = peer_addr);
-            let _guard = span.enter();
-
-            let start_ts = Instant::now();
-            loop {
-                match self.process_msg(&mut stream).await {
-                    Ok(_) => (),
-                    Err(ICAPError::SocketError(tokio::io::ErrorKind::BrokenPipe)) => {
-                        break;
-                    }
-                    Err(e) => {
-                        error!("[{:?}] ICAP error: {:?}", stream, e);
-                        break;
+            async {
+                let start_ts = Instant::now();
+                loop {
+                    match self.process_msg(&mut stream).await {
+                        Ok(_) => (),
+                        Err(ICAPError::SocketError(tokio::io::ErrorKind::BrokenPipe)) => {
+                            break;
+                        }
+                        Err(e) => {
+                            error!("[{:?}] ICAP error: {:?}", stream, e);
+                            break;
+                        }
                     }
                 }
-            }
-            let dur = Instant::now().duration_since(start_ts);
+                let dur = Instant::now().duration_since(start_ts);
 
-            info!("Session of [{:?}] took {}ms", peer_addr, dur.as_millis());
+                info!("Session took {}ms", dur.as_millis());
+            }
+            .instrument(info_span!("ICAPWorker", peer_addr = peer_addr))
+            .await;
         }
     }
 
     async fn process_msg(&mut self, con: &mut TcpStream) -> Result<(), ICAPError> {
-        let c_span = span!(Level::DEBUG, "process_msg");
-        let _guard = c_span.enter();
-
         let mut recv_buf = [0u8; 512];
 
         let mut buf: Vec<u8> = Vec::new();
@@ -221,6 +216,7 @@ impl<'w> ICAPWorker<'w> {
                         };
 
                         con.write_all(resp.as_bytes()).await?;
+                        con.shutdown().await?;
                     }
                     _ => {
                         let resp: String =

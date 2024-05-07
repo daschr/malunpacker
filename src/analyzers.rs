@@ -26,8 +26,7 @@ impl Analyze for SevenZAnalyzer {
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
         let mut sample_source = sample.get_fd()?;
 
-        let c_span = span!(Level::DEBUG, "SevenZAnalyzer");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "SevenZAnalyzer").entered();
 
         info!("scanning {:?}", sample);
         let mut dropped_samples: Option<Vec<Sample>> = None;
@@ -139,8 +138,7 @@ impl Analyze for ZipAnalyzer {
         sample: &Sample,
         context: &SampleContext,
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "ZipAnalyzer");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "ZipAnalyzer").entered();
 
         let sample_source = sample.get_fd()?;
 
@@ -259,8 +257,7 @@ impl Analyze for RawAnalyzer {
         sample: &Sample,
         context: &SampleContext,
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "RawAnalyzer");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "RawAnalyzer").entered();
 
         let mut scanner = context.yara_rules.scanner()?;
 
@@ -299,8 +296,7 @@ impl Analyze for MailAnalyzer {
         sample: &Sample,
         context: &SampleContext,
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "MailAnalyzer");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "MailAnalyzer").entered();
 
         let use_ml = env::var("USE_ML_FOR_CREDS_EXTRACTION").is_ok();
 
@@ -372,8 +368,7 @@ pub struct Iso9660Analyzer();
 
 impl Iso9660Analyzer {
     unsafe fn fetch_all_iso_files(p_iso: *mut iso9660_t) -> Result<Vec<Sample>, AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "fetch_all_iso_files");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "fetch_all_iso_files").entered();
 
         let mut dropped_samples: Vec<Sample> = Vec::new();
 
@@ -436,8 +431,7 @@ impl Iso9660Analyzer {
         p_iso: *mut iso9660_t,
         file_stat: &mut iso9660_stat_t,
     ) -> Option<Sample> {
-        let c_span = span!(Level::DEBUG, "read_sample_from_iso");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "read_sample_from_iso").entered();
 
         let filename = CStr::from_ptr(file_stat.filename.as_mut_ptr());
 
@@ -476,8 +470,7 @@ impl Analyze for Iso9660Analyzer {
         sample: &Sample,
         context: &SampleContext,
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
-        let c_span = span!(Level::DEBUG, "Iso9660Analyzer");
-        let _guard = c_span.enter();
+        let _span = span!(Level::INFO, "Iso9660Analyzer").entered();
 
         let mut scanner = context.yara_rules.scanner()?;
 

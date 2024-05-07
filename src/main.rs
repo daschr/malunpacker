@@ -10,7 +10,7 @@ mod yara_rulset;
 
 use sentry::ClientInitGuard;
 use std::sync::Arc;
-use tracing::{error, info, span, Level};
+use tracing::{error, info};
 
 use analyzer::Analyzer;
 use icap_api::ICAPWorker;
@@ -43,16 +43,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
         )))
     } else {
-        tracing_subscriber::fmt()
-            .with_thread_names(true)
-            .with_thread_ids(true)
-            .with_max_level(tracing::Level::INFO)
-            .init();
+        tracing_subscriber::fmt().with_line_number(true).init();
         None
     };
-
-    let c_span = span!(Level::INFO, "main");
-    let _g = c_span.enter();
 
     let analyzer = Arc::new(Analyzer::new(conf.yara_rules_file.as_path())?);
 
@@ -78,9 +71,6 @@ async fn run_icap(
     analyzer: Arc<Analyzer>,
     num_workers: usize,
 ) -> Result<(), Box<dyn Error>> {
-    let c_span = span!(Level::DEBUG, "ICAP");
-    let _guard = c_span.enter();
-
     let socket = tokio::net::TcpListener::bind(listen_addr)
         .await
         .expect("Could not open socket");
@@ -102,9 +92,8 @@ async fn run_icap(
     let mut c_worker = 0usize;
 
     loop {
-        let (stream, addr) = socket.accept().await?;
+        let (stream, _) = socket.accept().await?;
 
-        println!("[{:?}]", addr);
         if let Err(e) = workers.as_mut_slice()[c_worker].1.send(stream).await {
             error!("Could not enqueue stream into worker {}: {:?}", c_worker, e);
         }
