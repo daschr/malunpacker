@@ -9,11 +9,12 @@ use libcdio_sys::{
 };
 use mail_parser::{MessageParser, MimeHeaders};
 use sevenz_rust::{decompress_with_password, Password};
+use std::env;
 use std::ffi::{c_void, CStr, CString};
 use std::io::Read;
 use std::sync::Arc;
 
-use tracing::{error, info, span, warn, Level};
+use tracing::{debug, error, info, span, warn, Level};
 use zip::{result::ZipError, ZipArchive};
 
 pub struct SevenZAnalyzer();
@@ -52,6 +53,7 @@ impl Analyze for SevenZAnalyzer {
             Err(sevenz_rust::Error::PasswordRequired) => {
                 warn!("{:?} needs a password", sample);
 
+                let mut successfully_decrypted = false;
                 if let Some(unpacking_creds) = &sample.unpacking_creds {
                     for pw in unpacking_creds.as_slice() {
                         if decompress_with_password(
@@ -67,6 +69,8 @@ impl Analyze for SevenZAnalyzer {
                                 pw.as_str()
                             );
 
+                            successfully_decrypted = true;
+
                             let sample_list =
                                 filelister::list_files(context.unpacking_location, |p| Sample {
                                     name: p.to_str().map(|s| String::from(s)),
@@ -81,9 +85,16 @@ impl Analyze for SevenZAnalyzer {
                         }
                     }
                 }
+
+                if !successfully_decrypted {
+                    warn!(
+                        "Failed to decrypt password-protected sample {:?}, no password matches",
+                        sample
+                    );
+                }
             }
             Err(e) => {
-                error!("Could not unpack sample: {:?}", e);
+                error!("Could not unpack sample {:?}: {:?}", sample, e);
             }
         }
 
@@ -165,6 +176,8 @@ impl Analyze for ZipAnalyzer {
 
                     if need_password {
                         if let Some(unpacking_creds) = &sample.unpacking_creds {
+                            let mut successfully_decrypted = false;
+
                             for pw in unpacking_creds.as_slice() {
                                 match (&mut archive).by_index_decrypt(fileid, pw.as_bytes()) {
                                     Ok(Ok(mut file)) => {
@@ -175,6 +188,9 @@ impl Analyze for ZipAnalyzer {
                                                 file.name(),
                                                 pw
                                             );
+
+                                            successfully_decrypted = true;
+
                                             dropped_samples.push(Sample {
                                                 name: Some(file.name().to_string()),
                                                 data: Location::InMem(file_data),
@@ -192,6 +208,10 @@ impl Analyze for ZipAnalyzer {
                                         break;
                                     }
                                 }
+                            }
+
+                            if !successfully_decrypted {
+                                warn!("Could not decrypt password-protected sample {:?}, no password matches", sample);
                             }
                         }
                     }
@@ -282,6 +302,8 @@ impl Analyze for MailAnalyzer {
         let c_span = span!(Level::DEBUG, "MailAnalyzer");
         let _guard = c_span.enter();
 
+        let use_ml = env::var("USE_ML_FOR_CREDS_EXTRACTION").is_ok();
+
         let mail_content = match &sample.data {
             Location::InMem(mem) => mem.clone(),
             Location::File(path) => std::fs::read(path)?,
@@ -300,15 +322,11 @@ impl Analyze for MailAnalyzer {
             info!("attachment {}: {:?}", i, attachment.attachment_name());
             if possible_passwords.is_none() {
                 possible_passwords = if let Some(body) = mail.body_text(0) {
-                    let mut passwords: Vec<String> =
-                        body.split_whitespace().map(|s| s.to_string()).collect();
-
-                    if let Ok(credential_extractor) = CredentialExtractor::new() {
-                        if let Ok(Some(pw)) = credential_extractor.get_creds(body.to_string()) {
-                            passwords.push(pw);
-                        }
+                    if let Ok(cred_ex) = CredentialExtractor::new(use_ml) {
+                        Some(Arc::new(cred_ex.get_creds(&body)?))
+                    } else {
+                        None
                     }
-                    Some(Arc::new(passwords))
                 } else {
                     None
                 };
@@ -378,20 +396,18 @@ impl Iso9660Analyzer {
                 let node_stat = &mut *(_cdio_list_node_data(c_node) as *mut iso9660_stat_t);
 
                 let filename = CStr::from_ptr(node_stat.filename.as_ptr());
-                info!("filename: {:?}", filename);
+                debug!("filename: {:?}", filename);
                 match node_stat.type_ {
                     #[allow(non_upper_case_globals)]
                     iso9660_stat_s__STAT_DIR => {
                         let str_filename = filename.to_str().unwrap();
                         if str_filename != "." && str_filename != ".." {
-                            info!("'{}' is a directory", str_filename);
+                            debug!("'{}' is a directory", str_filename);
                             let mut fp_filename = cur_dir.clone();
                             fp_filename.push_str("/");
                             fp_filename.push_str(str_filename);
 
-                            info!("at here2");
                             dir_stack.push(fp_filename);
-                            info!("at here");
                         }
                     }
                     #[allow(non_upper_case_globals)]

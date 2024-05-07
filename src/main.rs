@@ -7,14 +7,15 @@ mod icap_api;
 mod inmem_file;
 mod yara_rulset;
 // mod http_api;
-use credential_extractor::CredentialExtractor;
+
 use sentry::ClientInitGuard;
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 use tracing::{error, info, span, Level};
 
-use analyzer::{Analyzer, Location, Sample};
+use analyzer::Analyzer;
 use icap_api::ICAPWorker;
-use std::{env, error::Error, net::SocketAddr, path::PathBuf, process};
+use std::{env, error::Error, net::SocketAddr, path::PathBuf};
+
 use tokio::{
     net::TcpStream,
     sync::mpsc::{channel, Sender},

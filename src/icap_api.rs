@@ -15,6 +15,7 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::mpsc::Receiver,
+    time::Instant,
 };
 
 trait AsStr {
@@ -111,13 +112,16 @@ impl<'w> ICAPWorker<'w> {
         info!("Awaiting stream...");
         while let Some(mut stream) = self.stream_rx.recv().await {
             info!("Got {:?}", &stream);
+            let start_ts = Instant::now();
             loop {
                 if let Err(e) = self.process_msg(&mut stream).await {
                     error!("[{:?}] ICAP error: {:?}", stream, e);
                     break;
                 }
             }
-            info!("[{:?}] closed", stream);
+            let dur = Instant::now().duration_since(start_ts);
+
+            info!("Session of [{:?}] took {}ms", stream, dur.as_millis());
         }
     }
 
