@@ -155,7 +155,8 @@ impl<'w> ICAPWorker<'w> {
 
             if req.parse(&buf.as_slice())?.is_complete() {
                 if req.method.is_none() {
-                    let resp: String = ICAPResponse::with_code_reason(204, "no mod needed").into();
+                    let resp: String =
+                        ICAPResponse::with_code_reason_close(204, "no mod needed").into();
 
                     con.write_all(resp.as_bytes()).await?;
                     break;
@@ -206,13 +207,18 @@ impl<'w> ICAPWorker<'w> {
                             Some(r) => ICAPResponse::new(
                                 200,
                                 Some("Infection found"),
-                                &[(
-                                    "X-Infection-Found",
-                                    &format!("Type=0; Resolution=2; Threat={r}"),
-                                )],
+                                &[
+                                    ("Connection", "close"),
+                                    (
+                                        "X-Infection-Found",
+                                        &format!("Type=0; Resolution=2; Threat={r}"),
+                                    ),
+                                ],
                             )
                             .into(),
-                            None => ICAPResponse::with_code_reason(204, "no mod needed").into(),
+                            None => {
+                                ICAPResponse::with_code_reason_close(204, "no mod needed").into()
+                            }
                         };
 
                         con.write_all(resp.as_bytes()).await?;
@@ -220,7 +226,7 @@ impl<'w> ICAPWorker<'w> {
                     }
                     _ => {
                         let resp: String =
-                            ICAPResponse::with_code_reason(204, "no mod needed").into();
+                            ICAPResponse::with_code_reason_close(204, "no mod needed").into();
 
                         con.write_all(resp.as_bytes()).await?;
                     }
@@ -340,11 +346,20 @@ impl ICAPResponse {
         }
     }
 
+    #[allow(unused)]
     fn with_code_reason(code: u16, reason: &str) -> Self {
         ICAPResponse {
             code,
             reason: Some(reason.to_string()),
             headers: None,
+        }
+    }
+
+    fn with_code_reason_close(code: u16, reason: &str) -> Self {
+        ICAPResponse {
+            code,
+            reason: Some(reason.to_string()),
+            headers: Some(vec![(str!("Connection"), str!("close"))]),
         }
     }
 }
