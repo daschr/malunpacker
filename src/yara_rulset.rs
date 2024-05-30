@@ -21,8 +21,18 @@ impl YaraRuleset {
     }
 
     pub fn update_yara_rules(&self, yara_rules_loc: &Path) -> Result<(), AnalyzerError> {
-        let compiler: Compiler = Compiler::new()?;
-        let compiler = compiler.add_rules_file(yara_rules_loc)?;
+        let mut compiler: Compiler = Compiler::new()?;
+
+        if yara_rules_loc.is_file() {
+            compiler.add_rules_file(yara_rules_loc)?;
+        } else {
+            for p in std::fs::read_dir(yara_rules_loc)? {
+                let p = p?.path();
+                if p.is_file() {
+                    compiler.add_rules_file(p)?;
+                }
+            }
+        }
 
         let yara_rules = compiler.compile_rules()?;
 
