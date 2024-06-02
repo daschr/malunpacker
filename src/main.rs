@@ -5,7 +5,7 @@ mod credential_extractor;
 mod filelister;
 mod icap_api;
 mod inmem_file;
-mod yara_rulset;
+mod yara_ruleset;
 // mod http_api;
 
 use sentry::ClientInitGuard;
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         None
     };
 
-    let analyzer = Arc::new(Analyzer::new(conf.yara_rules_file.as_path())?);
+    let analyzer = Arc::new(Analyzer::new(conf.yara_rules.as_path())?);
 
     info!("Serving ICAP...");
     tokio::runtime::Builder::new_multi_thread()

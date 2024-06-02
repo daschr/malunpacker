@@ -1,1 +1,1 @@
-yara_rules_file = "/etc/malunpacker/yara-rules-full.yar"
+yara_rules = "/etc/malunpacker/yara-rules-full.yar"

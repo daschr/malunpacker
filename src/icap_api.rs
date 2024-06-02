@@ -18,6 +18,7 @@ use tokio::{
     time::Instant,
 };
 
+#[allow(unused)]
 trait AsStr {
     fn as_str(&self) -> &'static str;
 }

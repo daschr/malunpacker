@@ -24,12 +24,12 @@ impl YaraRuleset {
         let mut compiler: Compiler = Compiler::new()?;
 
         if yara_rules_loc.is_file() {
-            compiler.add_rules_file(yara_rules_loc)?;
+            compiler = compiler.add_rules_file(yara_rules_loc)?;
         } else {
             for p in std::fs::read_dir(yara_rules_loc)? {
                 let p = p?.path();
-                if p.is_file() {
-                    compiler.add_rules_file(p)?;
+                if p.is_file() && matches!(p.extension().map(|s| s.to_str()), Some(Some(".yara"))) {
+                    compiler = compiler.add_rules_file(p)?;
                 }
             }
         }

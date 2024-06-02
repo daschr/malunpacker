@@ -10,7 +10,7 @@ use yara::{Rules as YaraRules, YaraError};
 
 use crate::analyzers::*;
 use crate::inmem_file::{InMemFile, ReadAndSeek};
-use crate::yara_rulset::YaraRuleset;
+use crate::yara_ruleset::YaraRuleset;
 
 use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;

@@ -11,7 +11,7 @@ pub struct Config {
     pub icap_api_listen_addr: Option<SocketAddr>,
     pub icap_num_workers: Option<usize>,
     pub http_api_listen_addr: Option<SocketAddr>,
-    pub yara_rules_file: PathBuf,
+    pub yara_rules: PathBuf,
     pub sentry_endpoint_url: Option<String>,
 }
 
@@ -63,7 +63,7 @@ impl Config {
             icap_api_listen_addr: SocketAddr::from_env("ICAP_API_LISTEN_ADDR")?,
             icap_num_workers: usize::from_env("ICAP_NUM_WORKERS")?,
             http_api_listen_addr: SocketAddr::from_env("HTTP_API_LISTEN_ADDR")?,
-            yara_rules_file: PathBuf::from(
+            yara_rules: PathBuf::from(
                 env::var("YARA_RULES_FILE").context("YARA_RULES_FILE not defined")?,
             ),
             sentry_endpoint_url: env::var("SENTRY_ENDPOINT_URL").ok(),
