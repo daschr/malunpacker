@@ -4,6 +4,8 @@
   <em>Born out of the frustration that Rspamd/ClamAV cannot unpack password-protected mail attachments containing malware.</em>
 </div>
 
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://hub.docker.com/r/daschr/malunpacker) ![docker build](https://github.com/daschr/malunpacker/actions/workflows/docker-image.yml/badge.svg) 
+
 ## Capabilities
 - tries to unpack password protected attachments using the mail body as a knowledge base for passwords
 - can also use a LLM to extract the password from the mail body
