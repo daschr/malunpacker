@@ -9,6 +9,7 @@ RUN apt update && apt install -y curl libcdio-dev libiso9660-dev libudf-dev liby
 COPY Cargo.toml /src/malunpacker/
 RUN mkdir /src/malunpacker/src
 RUN echo 'fn main() {println!("stub!");}' >/src/malunpacker/src/main.rs
+RUN echo 'fn main() {println!("stub!");}' >/src/malunpacker/src/malanalyze.rs
 ENV LD_LIBRARY_PATH=/src/malunpacker/libtorch/lib
 ENV LIBTORCH=/src/malunpacker/libtorch
 RUN cargo b --release
