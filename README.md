@@ -55,4 +55,6 @@
      ```
 5. That's it! You can now test malunpacker by sending some archive containeing malware or some ISO.
 ## LLM for credential extraction
-You may also enable the use of a LLM for credential extraction by specifing the environment variable `USE_ML_FOR_CREDS_EXTRACTION=true` in your docker-compose file. 
+You may also enable the use of a LLM for credential extraction by specifing the environment variable `USE_ML_FOR_CREDS_EXTRACTION=true` in your docker-compose file.
+
+The service uses [rust-bert](https://github.com/guillaume-be/rust-bert) for the ML part.
