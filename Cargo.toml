@@ -30,3 +30,4 @@ rust-bert = { version = "0.22.0" }
 anyhow = "1.0.82"
 sentry = "0.32.3"
 regex = "1.10.4"
+unrar = "0.5.3"

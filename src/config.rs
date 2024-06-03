@@ -6,6 +6,7 @@ use std::str::from_utf8;
 use std::{env, fs};
 use tracing::{debug, span, Level};
 
+#[allow(unused)]
 #[derive(Deserialize)]
 pub struct Config {
     pub icap_api_listen_addr: Option<SocketAddr>,

@@ -6,7 +6,6 @@ mod filelister;
 mod icap_api;
 mod inmem_file;
 mod yara_ruleset;
-// mod http_api;
 
 use sentry::ClientInitGuard;
 use std::sync::Arc;

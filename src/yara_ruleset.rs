@@ -28,7 +28,7 @@ impl YaraRuleset {
         } else {
             for p in std::fs::read_dir(yara_rules_loc)? {
                 let p = p?.path();
-                if p.is_file() && matches!(p.extension().map(|s| s.to_str()), Some(Some(".yara"))) {
+                if p.is_file() && matches!(p.extension().map(|s| s.to_str()), Some(Some("yar"))) {
                     compiler = compiler.add_rules_file(p)?;
                 }
             }

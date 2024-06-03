@@ -95,6 +95,7 @@ impl Sample {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub struct AnalysisResult {
     pub sample_id: Option<String>,
@@ -124,6 +125,13 @@ pub struct Analyzer {
     sample_analyzers: HashMap<Option<String>, AnalyzeFn>,
 }
 
+macro_rules! register_analyzer {
+    ($map:expr, $analyzer:ident) => {
+        $analyzer::mime_types().iter().for_each(|m| {
+            ($map).insert(Some((*m).to_string()), $analyzer::analyze);
+        });
+    };
+}
 impl Analyzer {
     pub fn new(yara_rules_loc: &Path) -> Result<Self, AnalyzerError> {
         let yara_ruleset = YaraRuleset::new();
@@ -131,21 +139,11 @@ impl Analyzer {
 
         let mut sample_analyzers: HashMap<Option<String>, AnalyzeFn> = HashMap::new();
 
-        SevenZAnalyzer::mime_types().iter().for_each(|m| {
-            sample_analyzers.insert(Some((*m).to_string()), SevenZAnalyzer::analyze);
-        });
-
-        ZipAnalyzer::mime_types().iter().for_each(|m| {
-            sample_analyzers.insert(Some((*m).to_string()), ZipAnalyzer::analyze);
-        });
-
-        MailAnalyzer::mime_types().iter().for_each(|m| {
-            sample_analyzers.insert(Some((*m).to_string()), MailAnalyzer::analyze);
-        });
-
-        Iso9660Analyzer::mime_types().iter().for_each(|m| {
-            sample_analyzers.insert(Some((*m).to_string()), Iso9660Analyzer::analyze);
-        });
+        register_analyzer!(&mut sample_analyzers, SevenZAnalyzer);
+        register_analyzer!(&mut sample_analyzers, ZipAnalyzer);
+        register_analyzer!(&mut sample_analyzers, RarAnalyzer);
+        register_analyzer!(&mut sample_analyzers, MailAnalyzer);
+        register_analyzer!(&mut sample_analyzers, Iso9660Analyzer);
 
         sample_analyzers.insert(None, RawAnalyzer::analyze);
 

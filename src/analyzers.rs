@@ -1,6 +1,7 @@
 use crate::analyzer::{AnalysisResult, Analyze, AnalyzerError, Location, Sample, SampleContext};
 use crate::credential_extractor::CredentialExtractor;
 use crate::filelister;
+use anyhow::Context;
 use libcdio_sys::{
     _cdio_list_begin, _cdio_list_free, _cdio_list_node_data, _cdio_list_node_next, iso9660_close,
     iso9660_ifs_readdir, iso9660_iso_seek_read, iso9660_open, iso9660_stat_free,
@@ -9,13 +10,17 @@ use libcdio_sys::{
 };
 use mail_parser::{MessageParser, MimeHeaders};
 use sevenz_rust::{decompress_with_password, Password};
-use std::env;
 use std::ffi::{c_void, CStr, CString};
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{env, fs};
+use unrar::error::UnrarError;
 
 use tracing::{debug, error, info, span, warn, Level};
 use zip::{result::ZipError, ZipArchive};
+
+use unrar::{Archive as RarArchive, OpenArchive};
 
 pub struct SevenZAnalyzer();
 
@@ -534,5 +539,209 @@ impl Analyze for Iso9660Analyzer {
 
     fn mime_types() -> &'static [&'static str] {
         &["application/x-iso9660-image"]
+    }
+}
+
+pub struct RarAnalyzer();
+
+impl From<unrar::error::UnrarError> for AnalyzerError {
+    fn from(value: unrar::error::UnrarError) -> Self {
+        AnalyzerError::Other(Box::new(value))
+    }
+}
+
+impl RarAnalyzer {
+    fn need_password(file: &Path) -> Result<bool, UnrarError> {
+        let mut ll = RarArchive::new(file).open_for_processing()?;
+
+        while let Some(header) = ll.read_header()? {
+            if header.entry().is_file() {
+                match header.test() {
+                    Err(e) if e.code == unrar::error::Code::MissingPassword => {
+                        return Ok(true);
+                    }
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(f) => {
+                        ll = f;
+                    }
+                }
+            } else {
+                ll = header.skip()?;
+            }
+        }
+        Ok(false)
+    }
+
+    fn check_password(file: &Path, password: &str) -> Result<bool, UnrarError> {
+        let mut ll = RarArchive::with_password(file, password).open_for_processing()?;
+
+        while let Some(header) = ll.read_header()? {
+            if header.entry().is_file() {
+                match header.test() {
+                    Err(e) if e.code == unrar::error::Code::BadPassword => {
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                    Ok(f) => {
+                        ll = f;
+                    }
+                }
+            } else {
+                ll = header.skip()?;
+            }
+        }
+        Ok(true)
+    }
+
+    fn extract_files(
+        mut listing: OpenArchive<unrar::Process, unrar::CursorBeforeHeader>,
+        sample: &Sample,
+        context: &SampleContext,
+    ) -> Result<Vec<Sample>, AnalyzerError> {
+        let mut unpacked_files = Vec::new();
+        env::set_current_dir(context.unpacking_location)?;
+        while let Some(header) = listing.read_header()? {
+            if header.entry().is_file() {
+                let filename = header.entry().filename.clone();
+                info!(
+                    "[RarAnalyzer] Unpacking {:?} with size {}",
+                    header.entry().filename,
+                    header.entry().unpacked_size
+                );
+                listing = header.extract()?;
+                let new_sample_name = {
+                    let mut r = None;
+                    if let Some(name) = filename.file_name() {
+                        if let Some(s) = name.to_str() {
+                            r = Some(s.to_string());
+                        }
+                    }
+                    r
+                };
+
+                let mut dropped_loc = PathBuf::from(context.unpacking_location);
+                dropped_loc.push(&filename);
+
+                unpacked_files.push(Sample {
+                    name: new_sample_name,
+                    data: Location::File(dropped_loc),
+                    unpacking_creds: sample.unpacking_creds.clone(),
+                });
+            } else {
+                info!("[RarAnalyzer] skipping dir: {:?}", header.entry().filename);
+                listing = header.skip()?;
+            }
+        }
+
+        Ok(unpacked_files)
+    }
+}
+
+impl Analyze for RarAnalyzer {
+    fn mime_types() -> &'static [&'static str] {
+        &[
+            "application/vnd.rar",
+            "application/x-rar-compressed",
+            "application/x-rar",
+        ]
+    }
+
+    fn analyze(
+        sample: &Sample,
+        context: &SampleContext,
+    ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
+        let sample_path: PathBuf = match &sample.data {
+            Location::InMem(mem) => {
+                let mut on_disk_path = PathBuf::from(context.unpacking_location);
+                on_disk_path.push("archive.rar");
+                fs::write(&on_disk_path, mem)?;
+                on_disk_path
+            }
+            Location::File(path) => path.clone(),
+        };
+
+        let need_password =
+            Self::need_password(&sample_path).context("Failed to check if password needed")?;
+
+        if need_password && sample.unpacking_creds.is_none() {
+            return Ok((
+                AnalysisResult {
+                    sample_id: None,
+                    matched_yara_rules: None,
+                },
+                None,
+            ));
+        }
+
+        let mut archive: Option<RarArchive> = None;
+
+        if !need_password {
+            archive = Some(RarArchive::new(sample_path.as_path()));
+        } else if sample.unpacking_creds.is_some() {
+            let creds = sample.unpacking_creds.as_ref().unwrap();
+            for password in creds.as_slice() {
+                if Self::check_password(&sample_path, &password)
+                    .context("Failed to check password")?
+                {
+                    info!(
+                        "[RarAnalyzer] extracted {} with password \"{}\"",
+                        sample_path.display(),
+                        password
+                    );
+                    archive = Some(RarArchive::with_password(&sample_path, password));
+                }
+            }
+
+            if archive.is_none() {
+                info!(
+                    "[RarAnalyzer] unable to find correct password for {}",
+                    sample_path.display()
+                );
+            }
+        };
+
+        if archive.is_none() {
+            return Ok((
+                AnalysisResult {
+                    sample_id: None,
+                    matched_yara_rules: None,
+                },
+                None,
+            ));
+        }
+
+        let archive = match archive.unwrap().open_for_processing() {
+            Ok(a) => a,
+            Err(e) => return Err(AnalyzerError::Other(e.into())),
+        };
+
+        let mut scanner = context.yara_rules.scanner()?;
+        let found_rules: Vec<String> = scanner
+            .scan_file(&sample_path)?
+            .iter()
+            .map(|r| r.identifier.to_string())
+            .collect();
+
+        let dropped_samples = Self::extract_files(archive, sample, context)?;
+
+        Ok((
+            AnalysisResult {
+                sample_id: None,
+                matched_yara_rules: if found_rules.is_empty() {
+                    None
+                } else {
+                    Some(found_rules)
+                },
+            },
+            if dropped_samples.is_empty() {
+                None
+            } else {
+                Some(dropped_samples)
+            },
+        ))
     }
 }

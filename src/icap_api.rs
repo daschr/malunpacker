@@ -72,6 +72,7 @@ pub struct ICAPWorker<'a> {
     analyzer: &'a Analyzer,
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ICAPError {
     SocketError(tokio::io::ErrorKind),
@@ -281,16 +282,6 @@ impl<'w> ICAPWorker<'w> {
                 return None;
             }
         };
-
-        // if let Some(sections) = req.encapsulated_sections.as_ref() {
-        //     for (sec, sectval) in sections.iter() {
-        //         println!("sec: {}", sec.as_str());
-        //         match from_utf8(&sectval) {
-        //             Ok(b) => println!("{}", b),
-        //             Err(e) => println!("Error dec: {:?}\n{:?}", e, sectval),
-        //         }
-        //     }
-        // }
 
         let mut mail: Vec<u8> = Vec::new();
 
