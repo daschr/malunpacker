@@ -1,0 +1,21 @@
+version: '3'
+services:
+  malunpacker:
+    image: daschr/malunpacker:latest
+    cpus: 2.0
+    logging:
+      options:
+        max-size: 50m
+    environment:
+      - "CONF_FROM_ENV=true"
+      - "ICAP_API_LISTEN_ADDR=0.0.0.0:10055"
+      - "ICAP_NUM_WORKERS=4"
+      - "YARA_RULES=/etc/malunpacker/rules/"
+    volumes:
+      - etc:/etc/malunpacker
+    ports:
+      - "10055:10055"
+    #restart: always
+
+volumes:
+  etc:
