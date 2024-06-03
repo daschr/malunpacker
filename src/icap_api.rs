@@ -119,7 +119,7 @@ impl<'w> ICAPWorker<'w> {
                             break;
                         }
                         Err(e) => {
-                            error!("[{:?}] ICAP error: {:?}", stream, e);
+                            info!("[{:?}] ICAP error: {:?}", stream, e);
                             break;
                         }
                     }
