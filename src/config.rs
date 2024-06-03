@@ -51,7 +51,7 @@ impl Config {
         let raw_data =
             fs::read(file).context(format!("Failed to read data from {}", file.display()))?;
 
-        let conf_str = from_utf8(&raw_data.as_slice()).context("Config file is not valid UTF-8")?;
+        let conf_str = from_utf8(raw_data.as_slice()).context("Config file is not valid UTF-8")?;
 
         debug!("Config:\n{}", conf_str);
         let conf: Config = toml::from_str(conf_str).context("Could not parse config file")?;

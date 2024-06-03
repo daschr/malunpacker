@@ -14,9 +14,7 @@ pub fn list_files<R>(dir: &Path, map_fn: fn(PathBuf) -> R) -> io::Result<Vec<R>>
         stack.push(dir.to_path_buf());
     }
 
-    while !stack.is_empty() {
-        let c_dir = stack.pop().unwrap();
-
+    while let Some(c_dir) = stack.pop() {
         for e in read_dir(c_dir.as_path())? {
             let e = e?.path();
             if e.is_file() {

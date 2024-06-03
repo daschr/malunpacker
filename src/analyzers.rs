@@ -44,7 +44,7 @@ impl Analyze for SevenZAnalyzer {
             Ok(_) => {
                 info!("successfully unpacked with empty password");
                 let sample_list = filelister::list_files(context.unpacking_location, |p| Sample {
-                    name: p.to_str().map(|s| String::from(s)),
+                    name: p.to_str().map(String::from),
                     data: Location::File(p),
                     unpacking_creds: None,
                 })?;
@@ -77,7 +77,7 @@ impl Analyze for SevenZAnalyzer {
 
                             let sample_list =
                                 filelister::list_files(context.unpacking_location, |p| Sample {
-                                    name: p.to_str().map(|s| String::from(s)),
+                                    name: p.to_str().map(String::from),
                                     data: Location::File(p),
                                     unpacking_creds: None,
                                 })?;
@@ -153,7 +153,7 @@ impl Analyze for ZipAnalyzer {
             Ok(mut archive) => {
                 for fileid in 0..archive.len() {
                     let mut need_password = false;
-                    match (&mut archive).by_index(fileid) {
+                    match archive.by_index(fileid) {
                         Ok(mut file) => {
                             if file.is_dir() {
                                 continue;
@@ -182,7 +182,7 @@ impl Analyze for ZipAnalyzer {
                             let mut successfully_decrypted = false;
 
                             for pw in unpacking_creds.as_slice() {
-                                match (&mut archive).by_index_decrypt(fileid, pw.as_bytes()) {
+                                match archive.by_index_decrypt(fileid, pw.as_bytes()) {
                                     Ok(Ok(mut file)) => {
                                         let mut file_data = Vec::new();
                                         if file.read_to_end(&mut file_data).is_ok() {
@@ -380,8 +380,7 @@ impl Iso9660Analyzer {
         let mut dir_stack: Vec<String> = Vec::new();
         dir_stack.push(String::from("/"));
 
-        while !dir_stack.is_empty() {
-            let cur_dir = dir_stack.pop().unwrap();
+        while let Some(cur_dir) = dir_stack.pop() {
             let c_cur_dir = CString::new(cur_dir.as_str()).unwrap();
 
             let raw_list = iso9660_ifs_readdir(p_iso, c_cur_dir.as_ptr());
@@ -404,7 +403,7 @@ impl Iso9660Analyzer {
                         if str_filename != "." && str_filename != ".." {
                             debug!("'{}' is a directory", str_filename);
                             let mut fp_filename = cur_dir.clone();
-                            fp_filename.push_str("/");
+                            fp_filename.push('/');
                             fp_filename.push_str(str_filename);
 
                             dir_stack.push(fp_filename);
@@ -561,7 +560,7 @@ impl RarAnalyzer {
                         return Ok(true);
                     }
                     Err(e) => {
-                        return Err(e.into());
+                        return Err(e);
                     }
                     Ok(f) => {
                         ll = f;
@@ -584,7 +583,7 @@ impl RarAnalyzer {
                         return Ok(false);
                     }
                     Err(e) => {
-                        return Err(e.into());
+                        return Err(e);
                     }
                     Ok(f) => {
                         ll = f;
@@ -684,7 +683,7 @@ impl Analyze for RarAnalyzer {
         } else if sample.unpacking_creds.is_some() {
             let creds = sample.unpacking_creds.as_ref().unwrap();
             for password in creds.as_slice() {
-                if Self::check_password(&sample_path, &password)
+                if Self::check_password(&sample_path, password)
                     .context("Failed to check password")?
                 {
                     info!(

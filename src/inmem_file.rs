@@ -25,7 +25,7 @@ impl<'a> Seek for InMemFile<'a> {
                         "SeekFrom::Start",
                     ));
                 }
-                self.pos = offset as u64;
+                self.pos = offset;
                 Ok(offset)
             }
             SeekFrom::End(pos) => {

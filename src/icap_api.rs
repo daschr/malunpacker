@@ -155,7 +155,7 @@ impl<'w> ICAPWorker<'w> {
 
             buf.extend_from_slice(&recv_buf[..nbytes]);
 
-            if req.parse(&buf.as_slice())?.is_complete() {
+            if req.parse(buf.as_slice())?.is_complete() {
                 if req.method.is_none() {
                     let resp: String =
                         ICAPResponse::with_code_reason_close(204, "no mod needed").into();
@@ -259,7 +259,7 @@ impl<'w> ICAPWorker<'w> {
         };
 
         for line in header.split("\r\n") {
-            if let Some((field, val)) = line.split_once(":") {
+            if let Some((field, val)) = line.split_once(':') {
                 if field.to_lowercase() == "content-length" {
                     if let Ok(length) = val.trim().parse::<usize>() {
                         return Some(length);
@@ -276,7 +276,7 @@ impl<'w> ICAPWorker<'w> {
         con: &mut TcpStream,
         req: &Request<'b, 'b>,
     ) -> Option<Vec<u8>> {
-        let mail_length = match Self::get_mail_length(&req) {
+        let mail_length = match Self::get_mail_length(req) {
             Some(l) => l,
             None => {
                 return None;
@@ -291,7 +291,7 @@ impl<'w> ICAPWorker<'w> {
             .unwrap()
             .get(&SectionType::ResponseBody)
         {
-            mail.extend_from_slice(&part_body);
+            mail.extend_from_slice(part_body);
         }
 
         let diff_length = mail_length - mail.len();

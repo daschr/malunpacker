@@ -171,9 +171,7 @@ impl Analyzer {
         scan_stack.push(sample);
         let mut first_sample = true;
 
-        while !scan_stack.is_empty() {
-            let sample = scan_stack.pop().unwrap();
-
+        while let Some(sample) = scan_stack.pop() {
             match &sample.data {
                 Location::InMem(mem) => {
                     info!(
@@ -192,10 +190,10 @@ impl Analyzer {
 
             let sample_type_str: Option<String> = {
                 let r = match &sample.data {
-                    Location::InMem(mem) => magic_cookie.buffer(&mem),
+                    Location::InMem(mem) => magic_cookie.buffer(mem),
                     Location::File(path) => magic_cookie.file(path),
                 }
-                .map_or_else(|_| None, |s| Some(s));
+                .map_or_else(|_| None, Some);
 
                 if first_sample {
                     first_sample = false;
