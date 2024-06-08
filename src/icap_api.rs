@@ -308,7 +308,17 @@ impl<'w> ICAPWorker<'w> {
             .unwrap()
             .get(&SectionType::ResponseBody)
         {
-            mail.extend_from_slice(part_body);
+            let mut start_pos = 0;
+            for i in 0..part_body.len() {
+                if part_body[i] == b'\n' {
+                    if !part_body[0..i].contains(&b':') {
+                        start_pos = i + 1;
+                    }
+                    break;
+                }
+            }
+
+            mail.extend_from_slice(&part_body[start_pos..]);
         }
         info!("Current: response body: {:?}", mail);
         let diff_length = mail_length - mail.len();
