@@ -39,7 +39,11 @@ impl AsStr for SectionType {
 trait ReadToVec {
     type Error;
 
+    #[allow(unused)]
     async fn read_to_vec(&mut self, vec: &mut Vec<u8>, length: usize) -> Result<(), Self::Error>;
+
+    #[allow(unused)]
+    async fn read_to_vec_end(&mut self, vec: &mut Vec<u8>) -> Result<(), Self::Error>;
 }
 
 impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
@@ -62,6 +66,19 @@ impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
             }
             vec.extend_from_slice(&buf[..r]);
             read_bytes += r;
+        }
+        Ok(())
+    }
+
+    async fn read_to_vec_end(self: &mut T, vec: &mut Vec<u8>) -> Result<(), Self::Error> {
+        let mut buf = [0u8; 512];
+
+        loop {
+            let r = self.read(&mut buf[..512]).await?;
+            if r == 0 {
+                break;
+            }
+            vec.extend_from_slice(&buf[..r]);
         }
         Ok(())
     }
@@ -293,7 +310,7 @@ impl<'w> ICAPWorker<'w> {
         {
             mail.extend_from_slice(part_body);
         }
-
+        info!("Current: response body: {:?}", mail);
         let diff_length = mail_length - mail.len();
 
         if con.read_to_vec(&mut mail, diff_length).await.is_ok() {
