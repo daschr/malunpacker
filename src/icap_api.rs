@@ -284,7 +284,7 @@ impl<'w> ICAPWorker<'w> {
             if let Some((field, val)) = line.split_once(':') {
                 info!("{}: {}", field, val);
                 if field.to_lowercase() == "content-length" {
-                    info!("parsing content-length: {}", val);
+                    info!("parsing content-length: {}", val.trim());
                     if let Ok(length) = val.trim().parse::<usize>() {
                         return Some(length);
                     }
@@ -332,7 +332,11 @@ impl<'w> ICAPWorker<'w> {
         }
 
         info!("Current: response body: {:?}", mail);
-        let diff_length = mail_length - already_read_bytes;
+        let diff_length = if mail_length > already_read_bytes {
+            mail_length - already_read_bytes
+        } else {
+            0
+        };
 
         if con.read_to_vec(&mut mail, diff_length).await.is_ok() {
             return Some(mail);
