@@ -8,6 +8,7 @@ use libcdio_sys::{
     iso9660_stat_s__STAT_DIR, iso9660_stat_s__STAT_FILE, iso9660_stat_t, iso9660_t,
     iso_enum1_s_ISO_BLOCKSIZE,
 };
+use mail_parser::decoders::base64::base64_decode;
 use mail_parser::{MessageParser, MimeHeaders};
 use sevenz_rust::{decompress_with_password, Password};
 use std::ffi::{c_void, CStr, CString};
@@ -332,9 +333,24 @@ impl Analyze for MailAnalyzer {
                     None
                 };
             }
+
+            let attachment_content = match attachment
+                .content_transfer_encoding()
+                .map(str::to_lowercase)
+            {
+                Some(enc_type) if enc_type == "base64" => {
+                    if let Some(dec) = base64_decode(attachment.contents()) {
+                        dec
+                    } else {
+                        Vec::from(attachment.contents())
+                    }
+                }
+                _ => Vec::from(attachment.contents()),
+            };
+
             dropped_samples.push(Sample {
                 name: attachment.attachment_name().map(|s| s.to_string()),
-                data: Location::InMem(Vec::from(attachment.contents())),
+                data: Location::InMem(attachment_content),
                 unpacking_creds: possible_passwords.clone(),
             });
         }
