@@ -279,9 +279,7 @@ impl<'w> ICAPWorker<'w> {
 
         for line in header.split("\r\n") {
             if let Some((field, val)) = line.split_once(':') {
-                info!("{}: {}", field, val);
                 if field.to_lowercase() == "content-length" {
-                    info!("parsing content-length: {}", val.trim());
                     if let Ok(length) = val.trim().parse::<usize>() {
                         return Some(length);
                     }
@@ -305,7 +303,6 @@ impl<'w> ICAPWorker<'w> {
         };
 
         let mut mail: Vec<u8> = Vec::new();
-        let mut already_read_bytes = 0usize;
 
         if let Some(part_body) = req
             .encapsulated_sections
@@ -323,12 +320,9 @@ impl<'w> ICAPWorker<'w> {
                 }
             }
 
-            already_read_bytes = part_body.len();
-
             mail.extend_from_slice(&part_body[start_pos..]);
         }
 
-        info!("Current: response body: {:?}", mail);
         let diff_length = if mail_length > mail.len() {
             mail_length - mail.len()
         } else {
@@ -338,7 +332,7 @@ impl<'w> ICAPWorker<'w> {
         if con.read_to_vec(&mut mail, diff_length).await.is_ok() {
             return Some(mail);
         }
-        info!("reading to vec");
+
         None
     }
 }
