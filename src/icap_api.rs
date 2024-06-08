@@ -57,21 +57,18 @@ impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
         let mut buf = [0u8; 512];
         let mut read_bytes = 0usize;
 
-        info!("need to read {} bytes", length);
         while read_bytes != length {
             let tbr = 512.min(length - read_bytes);
 
-            info!("reading {} bytes...", tbr);
             let r = self.read(&mut buf[..tbr]).await?;
             if r == 0 {
                 break;
             }
-            info!("read {} bytes...", r);
+
             vec.extend_from_slice(&buf[..r]);
             read_bytes += r;
         }
 
-        info!("successfully read {} bytes", length);
         Ok(())
     }
 
@@ -332,8 +329,8 @@ impl<'w> ICAPWorker<'w> {
         }
 
         info!("Current: response body: {:?}", mail);
-        let diff_length = if mail_length > already_read_bytes {
-            mail_length - already_read_bytes
+        let diff_length = if mail_length > mail.len() {
+            mail_length - mail.len()
         } else {
             0
         };
