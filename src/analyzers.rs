@@ -342,10 +342,18 @@ impl Analyze for MailAnalyzer {
                     if let Some(dec) = base64_decode(attachment.contents()) {
                         dec
                     } else {
+                        error!("Failed to decode attachment, even if Content-Transfer-Encoding is base64!");
                         Vec::from(attachment.contents())
                     }
                 }
-                _ => Vec::from(attachment.contents()),
+                Some(enc) => {
+                    info!("Unknown Content-Transfer-Encoding: {}, using plain", enc);
+                    Vec::from(attachment.contents())
+                }
+                None => {
+                    info!("Content-Transfer-Encoding not set, using plain");
+                    Vec::from(attachment.contents())
+                }
             };
 
             dropped_samples.push(Sample {
