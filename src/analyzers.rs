@@ -343,6 +343,11 @@ impl Analyze for MailAnalyzer {
                         dec
                     } else {
                         error!("Failed to decode attachment, even if Content-Transfer-Encoding is base64!");
+                        fs::write(
+                            format!("/tmp/{}", attachment.attachment_name().unwrap_or("noname")),
+                            attachment.contents(),
+                        )
+                        .ok();
                         Vec::from(attachment.contents())
                     }
                 }
