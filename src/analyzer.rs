@@ -16,6 +16,8 @@ use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;
 use tracing::{debug, error, info};
 
+const MAX_ANALYZING_STEPS: usize = 100;
+
 macro_rules! wrap_err {
     ($err:ident, $enum:ident) => {
         impl From<$err> for $enum {
@@ -171,7 +173,18 @@ impl Analyzer {
         scan_stack.push(sample);
         let mut first_sample = true;
 
+        let mut analyzing_step_counter = 0usize;
+
         while let Some(sample) = scan_stack.pop() {
+            if analyzing_step_counter >= MAX_ANALYZING_STEPS {
+                info!(
+                    "Max analyzing steps ({}) reached, aborting...",
+                    MAX_ANALYZING_STEPS
+                );
+                break;
+            }
+            analyzing_step_counter += 1;
+
             match &sample.data {
                 Location::InMem(mem) => {
                     info!(
