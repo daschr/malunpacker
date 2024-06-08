@@ -282,7 +282,9 @@ impl<'w> ICAPWorker<'w> {
 
         for line in header.split("\r\n") {
             if let Some((field, val)) = line.split_once(':') {
+                info!("{}: {}", field, val);
                 if field.to_lowercase() == "content-length" {
+                    info!("parsing content-length: {}", val);
                     if let Ok(length) = val.trim().parse::<usize>() {
                         return Some(length);
                     }
