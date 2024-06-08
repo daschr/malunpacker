@@ -301,6 +301,7 @@ impl<'w> ICAPWorker<'w> {
         };
 
         let mut mail: Vec<u8> = Vec::new();
+        let mut already_read_bytes = 0usize;
 
         if let Some(part_body) = req
             .encapsulated_sections
@@ -318,10 +319,13 @@ impl<'w> ICAPWorker<'w> {
                 }
             }
 
+            already_read_bytes = part_body.len();
+
             mail.extend_from_slice(&part_body[start_pos..]);
         }
+
         info!("Current: response body: {:?}", mail);
-        let diff_length = mail_length - mail.len();
+        let diff_length = mail_length - already_read_bytes;
 
         if con.read_to_vec(&mut mail, diff_length).await.is_ok() {
             return Some(mail);
