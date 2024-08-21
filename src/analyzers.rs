@@ -2,6 +2,7 @@ use crate::analyzer::{AnalysisResult, Analyze, AnalyzerError, Location, Sample, 
 use crate::credential_extractor::CredentialExtractor;
 use crate::filelister;
 use anyhow::Context;
+use bzip2::read::BzDecoder;
 use libcdio_sys::{
     _cdio_list_begin, _cdio_list_free, _cdio_list_node_data, _cdio_list_node_next, iso9660_close,
     iso9660_ifs_readdir, iso9660_iso_seek_read, iso9660_open, iso9660_stat_free,
@@ -15,12 +16,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{env, fs};
-use unrar::error::UnrarError;
-
 use tracing::{debug, error, info, span, warn, Level};
-use zip::{result::ZipError, ZipArchive};
-
+use unrar::error::UnrarError;
 use unrar::{Archive as RarArchive, OpenArchive};
+use zip::{result::ZipError, ZipArchive};
 
 pub struct SevenZAnalyzer();
 
@@ -128,11 +127,7 @@ impl Analyze for SevenZAnalyzer {
     }
 
     fn mime_types() -> &'static [&'static str] {
-        &[
-            "application/x-7z-compressed",
-            "application/x-bzip",
-            "application/x-bzip2",
-        ]
+        &["application/x-7z-compressed"]
     }
 }
 
@@ -183,7 +178,7 @@ impl Analyze for ZipAnalyzer {
 
                             for pw in unpacking_creds.as_slice() {
                                 match archive.by_index_decrypt(fileid, pw.as_bytes()) {
-                                    Ok(Ok(mut file)) => {
+                                    Ok(mut file) => {
                                         let mut file_data = Vec::new();
                                         if file.read_to_end(&mut file_data).is_ok() {
                                             info!(
@@ -202,8 +197,7 @@ impl Analyze for ZipAnalyzer {
                                             break;
                                         }
                                     }
-                                    Ok(Err(_))
-                                    | Err(ZipError::UnsupportedArchive(
+                                    Err(ZipError::UnsupportedArchive(
                                         ZipError::PASSWORD_REQUIRED,
                                     )) => (),
                                     Err(e) => {
@@ -221,7 +215,21 @@ impl Analyze for ZipAnalyzer {
                 }
             }
             Err(e) => {
-                error!("Could not open {:?} as a zip archive: {:?}", sample.name, e);
+                error!("Failed to open {:?} as a ZipArchive: {:?}", sample.name, e);
+
+                let mut buf = Vec::new();
+
+                if BzDecoder::new(sample.get_fd()?)
+                    .read_to_end(&mut buf)
+                    .is_ok()
+                {
+                    info!("Pushing bzip2 decrypted file on samples");
+                    dropped_samples.push(Sample {
+                        name: None,
+                        data: Location::InMem(buf),
+                        unpacking_creds: None,
+                    })
+                }
             }
         }
 
@@ -251,7 +259,88 @@ impl Analyze for ZipAnalyzer {
     }
 
     fn mime_types() -> &'static [&'static str] {
-        &["application/zip"]
+        &[
+            "application/zip",
+            "application/x-bzip",
+            "application/x-bzip2",
+        ]
+    }
+}
+
+pub struct TarAnalyzer;
+
+impl Analyze for TarAnalyzer {
+    fn analyze(
+        sample: &Sample,
+        context: &SampleContext,
+    ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
+        let _span = span!(Level::INFO, "TarAnalyzer").entered();
+
+        let sample_source = sample.get_fd()?;
+
+        let mut dropped_samples: Vec<Sample> = Vec::new();
+
+        let mut archive = tar::Archive::new(sample_source);
+        match archive.entries() {
+            Ok(entries) => {
+                for entry in entries {
+                    match entry {
+                        Ok(mut entry) => {
+                            let mut buf = Vec::new();
+                            if entry.read_to_end(&mut buf).is_ok() {
+                                let entry_name: Option<String> = {
+                                    if let Ok(Some(p)) = entry.link_name() {
+                                        p.to_str().map(String::from)
+                                    } else {
+                                        None
+                                    }
+                                };
+
+                                dropped_samples.push(Sample {
+                                    name: entry_name,
+                                    data: Location::InMem(buf),
+                                    unpacking_creds: None,
+                                })
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to read a entry of {:?}: {:?}", sample.name, e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to open {:?} as a TarArchive: {:?}", sample.name, e);
+            }
+        }
+
+        let mut scanner = context.yara_rules.scanner()?;
+
+        let sample_id: Option<String> = sample.name.clone();
+
+        let found_rules: Vec<String> = match &sample.data {
+            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::File(path) => scanner.scan_file(path)?,
+        }
+        .iter()
+        .map(|r| r.identifier.to_string())
+        .collect();
+
+        Ok((
+            AnalysisResult {
+                sample_id,
+                matched_yara_rules: if found_rules.is_empty() {
+                    None
+                } else {
+                    Some(found_rules)
+                },
+            },
+            Some(dropped_samples),
+        ))
+    }
+
+    fn mime_types() -> &'static [&'static str] {
+        &["application/x-tar"]
     }
 }
 

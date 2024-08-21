@@ -27,7 +27,7 @@ fn main() -> Result<(), AnalyzerError> {
     let ana = analyzer::Analyzer::new(PathBuf::from(&args[1]).as_path())?;
 
     let sample = Sample {
-        name: None,
+        name: Some(args[2].clone()),
         data: analyzer::Location::File(PathBuf::from(&args[2])),
         unpacking_creds: Some(Arc::new(vec!["test".to_string(), "geheim".to_string()])),
     };

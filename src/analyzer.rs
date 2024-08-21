@@ -142,6 +142,7 @@ impl Analyzer {
         let mut sample_analyzers: HashMap<Option<String>, AnalyzeFn> = HashMap::new();
 
         register_analyzer!(&mut sample_analyzers, SevenZAnalyzer);
+        register_analyzer!(&mut sample_analyzers, TarAnalyzer);
         register_analyzer!(&mut sample_analyzers, ZipAnalyzer);
         register_analyzer!(&mut sample_analyzers, RarAnalyzer);
         register_analyzer!(&mut sample_analyzers, MailAnalyzer);
