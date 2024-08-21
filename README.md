@@ -16,7 +16,8 @@
   |application/x-7z-compressed|yes|
   |application/x-bzip|yes|
   |application/x-bzip2|yes|
-  |application/x-iso9660-image|n.a.|
+  |application/x-tar|yes|
+  |application/x-iso9660-image|yes|
   |application/x-rar|yes|
   |application/x-rar-compressed|yes|
   |application/zip|yes|
