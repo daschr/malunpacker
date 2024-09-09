@@ -8,7 +8,10 @@ mod inmem_file;
 mod yara_ruleset;
 
 use sentry::ClientInitGuard;
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 use tracing::{error, info};
 
 use analyzer::Analyzer;
@@ -58,6 +61,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .unwrap_or("0.0.0.0:10055".parse::<SocketAddr>().unwrap()),
             analyzer,
             conf.icap_num_workers.unwrap_or(8),
+            conf.quarantine_location,
+            conf.cleanup_age,
         ))
         .expect("Failed to initialize tokio runtime");
 
@@ -65,10 +70,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+async fn quarantine_cleanup(quarantine_location: PathBuf, cleanup_age: Duration) {
+    loop {
+        tokio::time::sleep(cleanup_age).await;
+
+        if !quarantine_location.as_path().exists() {
+            continue;
+        }
+
+        if let Ok(mut dir) = tokio::fs::read_dir(quarantine_location.as_path()).await {
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                let metadata = match entry.metadata().await {
+                    Ok(md) => md,
+                    Err(_) => continue,
+                };
+
+                if !metadata.is_file() {
+                    continue;
+                }
+
+                let modified = match metadata.modified() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+
+                if let Ok(dur_diff) = SystemTime::now().duration_since(modified) {
+                    if dur_diff > cleanup_age {
+                        if let Err(e) = tokio::fs::remove_file(entry.path()).await {
+                            error!("Failed to delete file {}: {:?}", entry.path().display(), e);
+                        }
+
+                        info!("Removed quarantine file {}", entry.path().display());
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn run_icap(
     listen_addr: SocketAddr,
     analyzer: Arc<Analyzer>,
     num_workers: usize,
+    quarantine_location: Option<PathBuf>,
+    cleanup_age: Option<Duration>,
 ) -> Result<(), Box<dyn Error>> {
     let socket = tokio::net::TcpListener::bind(listen_addr)
         .await
@@ -80,12 +125,18 @@ async fn run_icap(
         let (tx, rx) = channel(100);
 
         let c_ana = analyzer.clone();
+        let c_ql = quarantine_location.clone();
         let handle = tokio::spawn(async move {
-            let mut worker = ICAPWorker::new(rx, c_ana.as_ref());
+            let mut worker = ICAPWorker::new(rx, c_ana.as_ref(), c_ql);
             worker.run().await;
         });
 
         workers.push((handle, tx));
+    }
+
+    if let (Some(ql), Some(ca)) = (quarantine_location, cleanup_age) {
+        let c_ql = ql.clone();
+        tokio::spawn(async move { quarantine_cleanup(c_ql, ca) });
     }
 
     let mut c_worker = 0usize;

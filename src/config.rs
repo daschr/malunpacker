@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::from_utf8;
+use std::time::Duration;
 use std::{env, fs};
 use tracing::{debug, span, Level};
 
@@ -14,6 +15,8 @@ pub struct Config {
     pub http_api_listen_addr: Option<SocketAddr>,
     pub yara_rules: PathBuf,
     pub sentry_endpoint_url: Option<String>,
+    pub quarantine_location: Option<PathBuf>,
+    pub cleanup_age: Option<Duration>,
 }
 
 trait FromEnv
@@ -66,6 +69,10 @@ impl Config {
             http_api_listen_addr: SocketAddr::from_env("HTTP_API_LISTEN_ADDR")?,
             yara_rules: PathBuf::from(env::var("YARA_RULES").context("YARA_RULES not defined")?),
             sentry_endpoint_url: env::var("SENTRY_ENDPOINT_URL").ok(),
+            quarantine_location: env::var("QUARANTINE_LOCATION").map(PathBuf::from).ok(),
+            cleanup_age: env::var("CLEANUP_AGE")
+                .map(|d| Duration::from_secs(d.parse::<u64>().expect("Failed to parse as number")))
+                .ok(),
         };
 
         Ok(conf)

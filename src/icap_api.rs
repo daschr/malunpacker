@@ -1,7 +1,7 @@
 use crate::analyzer::{Analyzer, Location, Sample};
 use icaparse::{Request, SectionType, EMPTY_HEADER};
 
-use std::str::from_utf8;
+use std::{path::PathBuf, str::from_utf8};
 
 use tracing::{debug, error, info, info_span, Instrument};
 
@@ -89,6 +89,7 @@ impl<T: AsyncRead + AsyncReadExt + Unpin> ReadToVec for T {
 pub struct ICAPWorker<'a> {
     stream_rx: Receiver<TcpStream>,
     analyzer: &'a Analyzer,
+    quarantine_location: Option<PathBuf>,
 }
 
 #[allow(unused)]
@@ -118,11 +119,15 @@ impl From<std::io::Error> for ICAPError {
 }
 
 impl<'w> ICAPWorker<'w> {
-    pub fn new(stream_rx: Receiver<TcpStream>, analyzer: &'w Analyzer) -> Self {
+    pub fn new(
+        stream_rx: Receiver<TcpStream>,
+        analyzer: &'w Analyzer,
+        quarantine_location: Option<PathBuf>,
+    ) -> Self {
         ICAPWorker {
             stream_rx,
-
             analyzer,
+            quarantine_location,
         }
     }
 
@@ -198,7 +203,7 @@ impl<'w> ICAPWorker<'w> {
                         if let Some(mail) = self.get_mail(con, &req).await {
                             let sample = Sample {
                                 name: Some(str!("mail")),
-                                data: Location::InMem(mail),
+                                data: Location::InMem(mail.clone()),
                                 unpacking_creds: None,
                             };
 
@@ -208,6 +213,7 @@ impl<'w> ICAPWorker<'w> {
                                 Ok(results) => {
                                     if !results.is_empty() {
                                         debug!("Found results: {:?}", results);
+
                                         for res in &results {
                                             if let Some(matched_rules) = &res.matched_yara_rules {
                                                 if !matched_rules.is_empty() {
@@ -220,6 +226,31 @@ impl<'w> ICAPWorker<'w> {
                                 }
                                 Err(e) => {
                                     error!("Analyzer error: {:?}", e);
+                                }
+                            }
+
+                            if matched_rule.is_some() {
+                                let digest = sha256::digest(&mail);
+
+                                if let Some(quarantine_location) = self.quarantine_location.as_ref()
+                                {
+                                    if let Err(e) = std::fs::create_dir_all(quarantine_location) {
+                                        error!(
+                                            "Failed to create quarantine location ({}): {:?}",
+                                            quarantine_location.display(),
+                                            e
+                                        );
+                                    } else {
+                                        let mut file_path = PathBuf::from(quarantine_location);
+                                        file_path.push(digest);
+                                        if let Err(e) = std::fs::write(&file_path, mail) {
+                                            error!(
+                                                "Failed to write quarantine file to {}: {:?}",
+                                                file_path.display(),
+                                                e
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
