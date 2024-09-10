@@ -45,7 +45,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
         )))
     } else {
-        tracing_subscriber::fmt().with_line_number(true).init();
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_line_number(true)
+            .init();
         None
     };
 
