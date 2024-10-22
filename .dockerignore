@@ -1,3 +1,4 @@
 *
 !src/
 !Cargo.toml
+!conf.toml

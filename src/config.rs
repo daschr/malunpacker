@@ -3,12 +3,11 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::from_utf8;
-use std::time::Duration;
 use std::{env, fs};
 use tracing::{debug, span, Level};
 
 #[allow(unused)]
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Config {
     pub icap_api_listen_addr: Option<SocketAddr>,
     pub icap_num_workers: Option<usize>,
@@ -16,9 +15,11 @@ pub struct Config {
     pub yara_rules: PathBuf,
     pub sentry_endpoint_url: Option<String>,
     pub quarantine_location: Option<PathBuf>,
-    pub cleanup_age: Option<Duration>,
+    pub cleanup_age_hours: Option<u64>,
+    pub yara_http_urls: Option<Vec<String>>,
 }
 
+#[allow(unused)]
 trait FromEnv
 where
     Self: Sized,
@@ -45,6 +46,7 @@ macro_rules! impl_FromEnv {
 impl_FromEnv!(SocketAddr);
 impl_FromEnv!(usize);
 
+#[allow(unused)]
 impl Config {
     pub fn read_from_file(file: &Path) -> anyhow::Result<Self> {
         let c_span = span!(Level::INFO, "read_from_file");
@@ -58,7 +60,7 @@ impl Config {
 
         debug!("Config:\n{}", conf_str);
         let conf: Config = toml::from_str(conf_str).context("Could not parse config file")?;
-
+        debug!("conf: {:?}", conf);
         Ok(conf)
     }
 
@@ -70,9 +72,10 @@ impl Config {
             yara_rules: PathBuf::from(env::var("YARA_RULES").context("YARA_RULES not defined")?),
             sentry_endpoint_url: env::var("SENTRY_ENDPOINT_URL").ok(),
             quarantine_location: env::var("QUARANTINE_LOCATION").map(PathBuf::from).ok(),
-            cleanup_age: env::var("CLEANUP_AGE")
-                .map(|d| Duration::from_secs(d.parse::<u64>().expect("Failed to parse as number")))
+            cleanup_age_hours: env::var("CLEANUP_AGE_HOURS")
+                .map(|d| d.parse::<u64>().expect("Failed to parse as number"))
                 .ok(),
+            yara_http_urls: None,
         };
 
         Ok(conf)

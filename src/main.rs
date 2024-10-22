@@ -9,6 +9,7 @@ mod yara_ruleset;
 
 use sentry::ClientInitGuard;
 use std::{
+    process,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -25,15 +26,15 @@ use tokio::{
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<String> = env::args().collect();
-
     let conf = if env::var("CONF_FROM_ENV").is_ok_and(|s| s.to_lowercase() == "true") {
         config::Config::read_from_env()?
     } else {
-        if args.len() < 2 {
-            eprintln!("Missing config file (or missed CONF_FROM_ENV=true)!");
+        if let Ok(conf_file) = env::var("CONF_FILE") {
+            config::Config::read_from_file(PathBuf::from(conf_file).as_path())?
+        } else {
+            eprintln!("Missing config file (specify CONF_FILE) (or missed CONF_FROM_ENV=true)!");
+            process::exit(1);
         }
-        config::Config::read_from_file(PathBuf::from(&args[1]).as_path())?
     };
 
     let _g: Option<ClientInitGuard> = if let Some(sentry_endpoint_rule) = conf.sentry_endpoint_url {
@@ -52,7 +53,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         None
     };
 
-    let analyzer = Arc::new(Analyzer::new(conf.yara_rules.as_path())?);
+    let analyzer = Arc::new(Analyzer::new(
+        conf.yara_rules.as_path(),
+        conf.yara_http_urls,
+    )?);
 
     info!("Serving ICAP...");
     tokio::runtime::Builder::new_multi_thread()
@@ -65,7 +69,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             analyzer,
             conf.icap_num_workers.unwrap_or(8),
             conf.quarantine_location,
-            conf.cleanup_age,
+            conf.cleanup_age_hours
+                .map(|h| Duration::from_secs(60 * 60 * h)),
         ))
         .expect("Failed to initialize tokio runtime");
 

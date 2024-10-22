@@ -10,10 +10,11 @@ use yara::{Rules as YaraRules, YaraError};
 
 use crate::analyzers::*;
 use crate::inmem_file::{InMemFile, ReadAndSeek};
-use crate::yara_ruleset::YaraRuleset;
+use crate::yara_ruleset::{ToHeaderMapError, YaraRuleset};
 
 use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;
+use reqwest::Error as ReqwuestError;
 use tracing::{debug, error, info};
 
 const MAX_ANALYZING_STEPS: usize = 100;
@@ -46,14 +47,22 @@ pub enum AnalyzerError {
     IoError(IoError),
     #[error("YaraError")]
     YaraError(YaraError),
-    #[error("YaraError2")]
+    #[error("YaraCrateError")]
     YaraCrateError(yara::Error),
     #[error("InvalidSample")]
     InvalidSample,
+    #[error("ToHeaderMapError")]
+    ToHeaderMapError(ToHeaderMapError),
+    #[error("ReqwestError")]
+    ReqwuestError(ReqwuestError),
+    #[error("InvalidYaraType")]
+    InvalidYaraType,
 }
 
 wrap_err!(IoError, AnalyzerError);
 wrap_err!(YaraError, AnalyzerError);
+wrap_err!(ToHeaderMapError, AnalyzerError);
+wrap_err!(ReqwuestError, AnalyzerError);
 wrap_err_to_val!(yara::Error, YaraCrateError, AnalyzerError);
 wrap_err_to_val!(Box<dyn std::error::Error>, Other, AnalyzerError);
 
@@ -135,9 +144,12 @@ macro_rules! register_analyzer {
     };
 }
 impl Analyzer {
-    pub fn new(yara_rules_loc: &Path) -> Result<Self, AnalyzerError> {
+    pub fn new(
+        yara_rules_loc: &Path,
+        yara_http_urls: Option<Vec<String>>,
+    ) -> Result<Self, AnalyzerError> {
         let yara_ruleset = YaraRuleset::new();
-        yara_ruleset.update_yara_rules(yara_rules_loc)?;
+        yara_ruleset.update_yara_rules(yara_rules_loc, yara_http_urls)?;
 
         let mut sample_analyzers: HashMap<Option<String>, AnalyzeFn> = HashMap::new();
 

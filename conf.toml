@@ -1,1 +1,10 @@
-yara_rules = "/etc/malunpacker/yara-rules-full.yar"
+icap_api_listen_addr="0.0.0.0:10055"
+icap_num_workers=4
+yara_rules="/etc/malunpacker/rules/"
+quarantine_location="/opt/quarantine"
+cleanup_age_hours=168
+yara_http_urls = [
+  "https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-full.zip",
+  "https://malpedia.caad.fkie.fraunhofer.de/api/get/yara/tlp_white/raw"
+]
+

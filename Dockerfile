@@ -23,13 +23,15 @@ ENV LIBTORCH=/src/malunpacker/libtorch
 RUN touch src/main.rs && cargo b --release --verbose && cp target/*/malunpacker .
 
 FROM debian:bookworm as malunpacker
-RUN apt update && apt install -y libiso9660-11 libcdio19 libudf0 libyara9 libgomp1 libclang1-14 && apt clean
-RUN mkdir -p /etc/malunpacker 
+RUN apt update && apt install -y libiso9660-11 libcdio19 libudf0 libyara9 libgomp1 libclang1-14 ca-certificates && apt clean
+RUN mkdir -p /etc/malunpacker
+RUN mkdir -p /etc/malunpacker/rules
+COPY ./conf.toml /etc/malunpacker/
 COPY --from=build /src/malunpacker/malunpacker /bin/malunpacker
 COPY --from=build /src/malunpacker/libtorch /opt/libtorch
 ENV LD_LIBRARY_PATH=/opt/libtorch/lib
 ENV LIBTORCH=/opt/libtorch
-ENV CONF_FROM_ENV=true
+ENV CONF_FILE=/etc/malunpacker/conf.toml
 VOLUME /etc/malunpacker
 WORKDIR /tmp
 ENTRYPOINT [ "/bin/malunpacker", "serve" ]
