@@ -6,6 +6,10 @@ mod filelister;
 mod icap_api;
 mod inmem_file;
 mod yara_ruleset;
+use tracing_subscriber::{
+    filter::{EnvFilter, LevelFilter},
+    fmt,
+};
 
 use sentry::ClientInitGuard;
 use std::{
@@ -46,9 +50,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
         )))
     } else {
-        tracing_subscriber::fmt()
+        fmt()
             .with_ansi(false)
             .with_line_number(true)
+            .with_thread_ids(true)
             .init();
         None
     };

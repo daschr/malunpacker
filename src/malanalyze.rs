@@ -37,7 +37,10 @@ fn main() -> Result<(), AnalyzerError> {
         unpacking_creds: Some(Arc::new(vec!["test".to_string(), "s3cr3t".to_string()])),
     };
 
-    println!("Result: {:?}", ana.analyze(sample, None));
+    println!(
+        "Result: {:?}",
+        ana.analyze(sample, if args.len() < 4 { None } else { Some(&args[3]) })
+    );
 
     Ok(())
 }

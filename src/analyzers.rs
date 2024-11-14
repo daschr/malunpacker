@@ -199,7 +199,8 @@ impl Analyze for ZipAnalyzer {
                                     }
                                     Err(ZipError::UnsupportedArchive(
                                         ZipError::PASSWORD_REQUIRED,
-                                    )) => (),
+                                    ))
+                                    | Err(ZipError::InvalidPassword) => (),
                                     Err(e) => {
                                         error!("Could not unpack sample: {:?}", e);
                                         break;
