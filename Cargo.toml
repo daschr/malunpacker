@@ -12,7 +12,7 @@ path = "src/malanalyze.rs"
 [dependencies]
 icaparse = "0.2.0"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "rt-multi-thread", "macros", "time", "sync", "net"] }
-yara = "0.26.0"
+yara = { version = "0.26.0", features = ["vendored"]}
 sevenz-rust = { version = "0.6.0", features = ["aes256", "zstd", "bzip2"]}
 tempfile = "3.10.1"
 simple_logger = "4.3.3"
