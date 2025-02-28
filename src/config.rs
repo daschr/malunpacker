@@ -75,7 +75,13 @@ impl Config {
             cleanup_age_hours: env::var("CLEANUP_AGE_HOURS")
                 .map(|d| d.parse::<u64>().expect("Failed to parse as number"))
                 .ok(),
-            yara_http_urls: None,
+            yara_http_urls: {
+                if let Ok(urls) = env::var("YARA_HTTP_URLS") {
+                    Some(urls.split(";").map(|s| s.to_string()).collect())
+                } else {
+                    None
+                }
+            },
         };
 
         Ok(conf)
