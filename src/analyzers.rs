@@ -4,22 +4,23 @@ use crate::filelister;
 use anyhow::Context;
 use bzip2::read::BzDecoder;
 use libcdio_sys::{
-    _cdio_list_begin, _cdio_list_free, _cdio_list_node_data, _cdio_list_node_next, iso9660_close,
-    iso9660_ifs_readdir, iso9660_iso_seek_read, iso9660_open, iso9660_stat_free,
-    iso9660_stat_s__STAT_DIR, iso9660_stat_s__STAT_FILE, iso9660_stat_t, iso9660_t,
-    iso_enum1_s_ISO_BLOCKSIZE,
+    _cdio_list_begin, _cdio_list_free, _cdio_list_node_data, _cdio_list_node_next,
+    iso_enum1_s_ISO_BLOCKSIZE, iso9660_close, iso9660_ifs_readdir, iso9660_iso_seek_read,
+    iso9660_open, iso9660_stat_free, iso9660_stat_s__STAT_DIR, iso9660_stat_s__STAT_FILE,
+    iso9660_stat_t, iso9660_t,
 };
 use mail_parser::{MessageParser, MimeHeaders};
-use sevenz_rust::{decompress_with_password, Password};
-use std::ffi::{c_void, CStr, CString};
+use sevenz_rust::{Password, decompress_with_password};
+use std::ffi::{CStr, CString, c_void};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{env, fs};
-use tracing::{debug, error, info, span, warn, Level};
+use tracing::{Level, debug, error, info, span, warn};
 use unrar::error::UnrarError;
 use unrar::{Archive as RarArchive, OpenArchive};
-use zip::{result::ZipError, ZipArchive};
+use yara_x::Scanner;
+use zip::{ZipArchive, result::ZipError};
 
 pub struct SevenZAnalyzer();
 
@@ -101,14 +102,14 @@ impl Analyze for SevenZAnalyzer {
             }
         }
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
 
         let found_rules: Vec<String> = match &sample.data {
-            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::InMem(mem) => scanner.scan(mem)?,
             Location::File(path) => scanner.scan_file(path)?,
         }
-        .iter()
-        .map(|r| r.identifier.to_string())
+        .matching_rules()
+        .map(|r| r.identifier().to_string())
         .collect();
 
         let sample_id: Option<String> = sample.name.clone();
@@ -209,7 +210,10 @@ impl Analyze for ZipAnalyzer {
                             }
 
                             if !successfully_decrypted {
-                                warn!("Could not decrypt password-protected sample {:?}, no password matches", sample);
+                                warn!(
+                                    "Could not decrypt password-protected sample {:?}, no password matches",
+                                    sample
+                                );
                             }
                         }
                     }
@@ -234,16 +238,16 @@ impl Analyze for ZipAnalyzer {
             }
         }
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
 
         let sample_id: Option<String> = sample.name.clone();
 
         let found_rules: Vec<String> = match &sample.data {
-            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::InMem(mem) => scanner.scan(mem)?,
             Location::File(path) => scanner.scan_file(path)?,
         }
-        .iter()
-        .map(|r| r.identifier.to_string())
+        .matching_rules()
+        .map(|r| r.identifier().to_string())
         .collect();
 
         Ok((
@@ -315,16 +319,16 @@ impl Analyze for TarAnalyzer {
             }
         }
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
 
         let sample_id: Option<String> = sample.name.clone();
 
         let found_rules: Vec<String> = match &sample.data {
-            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::InMem(mem) => scanner.scan(mem)?,
             Location::File(path) => scanner.scan_file(path)?,
         }
-        .iter()
-        .map(|r| r.identifier.to_string())
+        .matching_rules()
+        .map(|r| r.identifier().to_string())
         .collect();
 
         Ok((
@@ -354,14 +358,14 @@ impl Analyze for RawAnalyzer {
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
         let _span = span!(Level::INFO, "RawAnalyzer").entered();
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
 
         let found_rules: Vec<String> = match &sample.data {
-            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::InMem(mem) => scanner.scan(mem)?,
             Location::File(path) => scanner.scan_file(path)?,
         }
-        .iter()
-        .map(|r| r.identifier.to_string())
+        .matching_rules()
+        .map(|r| r.identifier().to_string())
         .collect();
 
         let sample_id: Option<String> = sample.name.clone();
@@ -430,14 +434,14 @@ impl Analyze for MailAnalyzer {
             });
         }
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
 
         let found_rules: Vec<String> = match &sample.data {
-            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::InMem(mem) => scanner.scan(mem)?,
             Location::File(path) => scanner.scan_file(path)?,
         }
-        .iter()
-        .map(|r| r.identifier.to_string())
+        .matching_rules()
+        .map(|r| r.identifier().to_string())
         .collect();
 
         let sample_id: Option<String> = sample.name.clone();
@@ -567,14 +571,14 @@ impl Analyze for Iso9660Analyzer {
     ) -> Result<(AnalysisResult, Option<Vec<Sample>>), AnalyzerError> {
         let _span = span!(Level::INFO, "Iso9660Analyzer").entered();
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
 
         let found_rules: Vec<String> = match &sample.data {
-            Location::InMem(mem) => scanner.scan_mem(mem)?,
+            Location::InMem(mem) => scanner.scan(mem)?,
             Location::File(path) => scanner.scan_file(path)?,
         }
-        .iter()
-        .map(|r| r.identifier.to_string())
+        .matching_rules()
+        .map(|r| r.identifier().to_string())
         .collect();
 
         let sample_id: Option<String> = sample.name.clone();
@@ -809,11 +813,11 @@ impl Analyze for RarAnalyzer {
             Err(e) => return Err(AnalyzerError::Other(e.into())),
         };
 
-        let mut scanner = context.yara_rules.scanner()?;
+        let mut scanner = Scanner::new(context.yara_rules);
         let found_rules: Vec<String> = scanner
             .scan_file(&sample_path)?
-            .iter()
-            .map(|r| r.identifier.to_string())
+            .matching_rules()
+            .map(|r| r.identifier().to_string())
             .collect();
 
         let dropped_samples = Self::extract_files(archive, sample, context)?;

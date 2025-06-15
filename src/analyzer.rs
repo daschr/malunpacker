@@ -6,14 +6,15 @@ use std::io::Error as IoError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
-use yara::{Rules as YaraRules, YaraError};
+use yara_x::errors::CompileError;
+use yara_x::{Rules as YaraRules, ScanError};
 
 use crate::analyzers::*;
 use crate::inmem_file::{InMemFile, ReadAndSeek};
 use crate::yara_ruleset::{ToHeaderMapError, YaraRuleset};
 
-use magic::cookie::DatabasePaths;
 use magic::Cookie as MagicCookie;
+use magic::cookie::DatabasePaths;
 use reqwest::Error as ReqwuestError;
 use tracing::{debug, error, info};
 
@@ -45,10 +46,10 @@ pub enum AnalyzerError {
     Other(Box<dyn std::error::Error>),
     #[error("IoError")]
     IoError(IoError),
-    #[error("YaraError")]
-    YaraError(YaraError),
-    #[error("YaraCrateError")]
-    YaraCrateError(yara::Error),
+    #[error("CompileError")]
+    CompileError(CompileError),
+    #[error("ScanError")]
+    ScanError(ScanError),
     #[error("InvalidSample")]
     InvalidSample,
     #[error("ToHeaderMapError")]
@@ -60,10 +61,11 @@ pub enum AnalyzerError {
 }
 
 wrap_err!(IoError, AnalyzerError);
-wrap_err!(YaraError, AnalyzerError);
+wrap_err!(CompileError, AnalyzerError);
 wrap_err!(ToHeaderMapError, AnalyzerError);
 wrap_err!(ReqwuestError, AnalyzerError);
-wrap_err_to_val!(yara::Error, YaraCrateError, AnalyzerError);
+wrap_err!(ScanError, AnalyzerError);
+
 wrap_err_to_val!(Box<dyn std::error::Error>, Other, AnalyzerError);
 
 impl From<magic::cookie::OpenError> for AnalyzerError {

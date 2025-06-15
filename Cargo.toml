@@ -1,7 +1,7 @@
 [package]
 name = "malunpacker"
-version = "0.1.0"
-edition = "2021"
+version = "1.0.0"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,7 +12,6 @@ path = "src/malanalyze.rs"
 [dependencies]
 icaparse = "0.2.0"
 tokio = { version = "1.37.0", features = ["fs", "io-util", "rt-multi-thread", "macros", "time", "sync", "net"] }
-yara = { version = "0.26.0", features = ["vendored"]}
 sevenz-rust = { version = "0.6.0", features = ["aes256", "zstd", "bzip2"]}
 tempfile = "3.10.1"
 simple_logger = "4.3.3"
@@ -35,3 +34,4 @@ bzip2 = "0.4.4"
 tar = "0.4.41"
 sha256 = "1.5.0"
 reqwest = "0.12.8"
+yara-x = "1.1.0"

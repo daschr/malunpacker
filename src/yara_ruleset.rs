@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
+    fs,
     path::Path,
     str::FromStr,
-    sync::{atomic::AtomicUsize, RwLock},
+    sync::{RwLock, atomic::AtomicUsize},
 };
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue};
 use std::io::Read;
-use yara::{Compiler, Rules as YaraRules};
+use yara_x::{Compiler, Rules as YaraRules};
 use zip::ZipArchive;
 
 use crate::{analyzer::AnalyzerError, inmem_file::InMemFile};
@@ -31,18 +32,19 @@ impl YaraRuleset {
         yara_rules_loc: &Path,
         yara_http_urls: Option<Vec<String>>,
     ) -> Result<(), AnalyzerError> {
-        let mut compiler: Compiler = Compiler::new()?;
+        let mut compiler: Compiler = Compiler::new();
 
         if yara_rules_loc.is_file() {
             debug!("Reading yara rules from {}", yara_rules_loc.display());
-            compiler = compiler.add_rules_file(yara_rules_loc)?;
+            let rules = fs::read(yara_rules_loc)?;
+            compiler.add_source(rules.as_slice())?;
         } else {
             for p in std::fs::read_dir(yara_rules_loc)? {
                 let p = p?.path();
 
                 debug!("Reading yara rules from {}", p.display());
                 if p.is_file() && matches!(p.extension().map(|s| s.to_str()), Some(Some("yar"))) {
-                    compiler = compiler.add_rules_file(p)?;
+                    compiler.add_include_dir(p);
                 }
             }
         }
@@ -50,14 +52,13 @@ impl YaraRuleset {
         if let Some(urls) = yara_http_urls {
             for url in urls {
                 info!("Fetching rules from {}", &url);
-                compiler =
-                    compiler.add_rules_str(YaraHTTPFetcher::fetch_all(url.as_str())?.as_str())?;
+                compiler.add_source(YaraHTTPFetcher::fetch_all(url.as_str())?.as_str())?;
             }
         }
 
-        let yara_rules = compiler.compile_rules()?;
+        let yara_rules = compiler.build();
 
-        info!("#rules: {}", yara_rules.get_rules().len());
+        info!("#rules: {}", yara_rules.iter().len());
 
         let new_pos = self.pos.load(std::sync::atomic::Ordering::Acquire) ^ 1;
 
